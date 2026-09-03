@@ -9,9 +9,14 @@ and what would invalidate it all shown, not hidden behind a black box.
 Beyond the core signal, the platform adds: signal history and stability tracking, market-regime
 detection (and regime-conditioned performance), relative-strength and sector comparison, optional
 fundamental scoring, a full quantitative Model Evaluation suite (CAGR, Sortino, Calmar, beta/alpha,
-exposure, turnover, and more), out-of-sample validation, parameter sensitivity/robustness analysis,
-walk-forward and Monte Carlo backtesting checks, a watchlist, and an advanced simulation-only
-paper-trading engine with position sizing and stop-loss/take-profit/trailing-stop controls.
+exposure, turnover, and more), out-of-sample validation, parameter sensitivity/robustness analysis
+(including indicator-period sweeps and a 2D heatmap), walk-forward and Monte Carlo backtesting
+checks, multi-ticker portfolio backtesting with configurable allocation/rebalancing/constraints,
+side-by-side stock comparison, a five-dimension Model Scorecard, a watchlist, and an advanced
+simulation-only paper-trading engine with position sizing, stop-loss/take-profit/trailing-stop
+controls, persistent equity-curve history, and a dedicated **Forward Validation** engine that tracks
+how the model actually performs as real market data arrives — conceptually and technically distinct
+from backtesting, which replays the past.
 
 > **Not financial advice.** This is a research and educational tool. It does not guarantee returns,
 > does not predict the future, and is not a substitute for professional financial advice. See
@@ -48,14 +53,18 @@ paper-trading engine with position sizing and stop-loss/take-profit/trailing-sto
 25. [Data Quality Layer](#data-quality-layer)
 26. [Watchlist](#watchlist)
 27. [Paper Trading](#paper-trading)
-28. [No-Look-Ahead-Bias Guarantee](#no-look-ahead-bias-guarantee)
-29. [Data Freshness & Status Labels](#data-freshness--status-labels)
-30. [yfinance / Yahoo Finance Limitations](#yfinance--yahoo-finance-limitations)
-31. [Financial Disclaimer](#financial-disclaimer)
-32. [Testing](#testing)
-33. [Deployment Considerations](#deployment-considerations)
-34. [GitHub Setup](#github-setup)
-35. [Known Limitations & Remaining Work](#known-limitations--remaining-work)
+28. [Forward Validation (Paper Trading ≠ Backtesting)](#forward-validation-paper-trading--backtesting)
+29. [Portfolio Backtesting](#portfolio-backtesting)
+30. [Stock Comparison](#stock-comparison)
+31. [Model Scorecard & Model-vs-Model Comparison](#model-scorecard--model-vs-model-comparison)
+32. [No-Look-Ahead-Bias Guarantee](#no-look-ahead-bias-guarantee)
+33. [Data Freshness & Status Labels](#data-freshness--status-labels)
+34. [yfinance / Yahoo Finance Limitations](#yfinance--yahoo-finance-limitations)
+35. [Financial Disclaimer](#financial-disclaimer)
+36. [Testing](#testing)
+37. [Deployment Considerations](#deployment-considerations)
+38. [GitHub Setup](#github-setup)
+39. [Known Limitations & Remaining Work](#known-limitations--remaining-work)
 
 ---
 
@@ -248,14 +257,19 @@ All responses include a `meta` object: `data_source`, `data_status`, `retrieved_
 | POST | `/api/backtest` | Runs the backtest engine (see request body below); response includes `advanced_metrics` (see [Model Evaluation Metrics](#model-evaluation-metrics)) |
 | POST | `/api/backtest/walk-forward` | Sequential train/test-window robustness analysis |
 | POST | `/api/backtest/monte-carlo` | Bootstrap-resampling robustness simulation over a backtest |
-| POST | `/api/backtest/sensitivity` | BUY/SELL-threshold perturbation + robustness classification |
+| POST | `/api/backtest/sensitivity` | Threshold + indicator-period perturbation and robustness classification (see [Parameter Sensitivity & Robustness](#parameter-sensitivity--robustness)) |
+| POST | `/api/backtest/sensitivity/heatmap` | 2D grid over two sensitivity parameters at once |
 | POST | `/api/backtest/out-of-sample` | In-sample / validation / out-of-sample three-period split |
+| POST | `/api/backtest/portfolio` | Multi-ticker (2-20) allocation backtest (see [Portfolio Backtesting](#portfolio-backtesting)) |
+| POST | `/api/compare` | Side-by-side 2-8 ticker comparison (see [Stock Comparison](#stock-comparison)) |
 | GET | `/api/market/status` | Major indexes + gainers/losers from a fixed watchlist |
 | GET | `/api/market/regime?benchmark=SPY` | Deterministic Bull/Bear/Sideways/High-Volatility classification |
 | GET | `/api/search?q=` | Ticker/company search (via Yahoo Finance search) |
 | GET | `/api/model` | Full model methodology reference (versions, weights, thresholds) |
 | GET | `/api/model/performance?ticker=` | Signal counts, stability, performance analytics, and a reference backtest for one ticker |
 | POST | `/api/model/regime-performance` | Regroups a backtest's realized returns by benchmark regime (see [Regime-Conditioned Performance](#regime-conditioned-performance)) |
+| POST | `/api/model/scorecard` | Five-dimension model scorecard (see [Model Scorecard & Model-vs-Model Comparison](#model-scorecard--model-vs-model-comparison)) |
+| POST | `/api/model/compare-versions` | v1.0 vs v1.1 backtest + forward comparison |
 | GET | `/api/watchlist?watchlist_id=default` | Enriched watchlist (real quote + fresh signal per ticker) |
 | POST | `/api/watchlist` | Add a ticker (`watchlist_id`, `ticker`) |
 | DELETE | `/api/watchlist/{ticker}?watchlist_id=default` | Remove a ticker |
@@ -265,6 +279,8 @@ All responses include a `meta` object: `data_source`, `data_status`, `retrieved_
 | POST | `/api/paper-portfolio/reset?portfolio_id=default&starting_capital=10000` | Reset a paper-trading portfolio |
 | POST | `/api/paper-portfolio/close-all?portfolio_id=default` | Liquidate every open position (`exit_reason=END_OF_TEST`) |
 | GET | `/api/paper-portfolio/risk?portfolio_id=default` | Exposure/concentration/sector risk dashboard |
+| GET | `/api/paper-portfolio/history?portfolio_id=default` | Persistent, append-only daily equity snapshot history (see [Paper Trading](#paper-trading)) |
+| GET | `/api/paper-portfolio/forward-validation?portfolio_id=default` | Forward paper-trading observation summary (see [Forward Validation](#forward-validation-paper-trading--backtesting)) |
 | GET | `/api/health` | Liveness check |
 
 **POST `/api/backtest` body:**
@@ -507,23 +523,40 @@ surface, not a bug.
 
 ## Parameter Sensitivity & Robustness
 
-`POST /api/backtest/sensitivity` is the primary overfitting-detection tool. It perturbs the BUY and
-SELL score thresholds independently around their defaults (`[55, 60, 65, 70, 75]` and
-`[20, 25, 30, 35, 40]`) and re-runs the backtest engine for each value, then classifies each
-parameter's robustness by the coefficient of variation (std/\|mean\|) of total return across all
-tested values: `HIGHER_ROBUSTNESS` (CV < 0.5), `LOW_ROBUSTNESS` (CV ≥ 0.5), or
-**`PARAMETER_INERT`** when every tested value produced an identical result. The `PARAMETER_INERT`
-case is not a hypothetical: the current long/flat engine's entry/exit rule only checks whether the
-signal is BUY-class, so the SELL/STRONG_SELL boundary (`sell_threshold`) cannot change a single
-trade at any value — reporting that as "robust" would misrepresent "has no effect" as "stable
-performance," so it's called out explicitly instead (see
-`backend/tests/test_v3_sensitivity_and_oos.py::test_sensitivity_detects_inert_parameter`). The
-`robust_region` is the longest contiguous run of tested values (including the default) that keep
-the same return sign as the default.
+`POST /api/backtest/sensitivity` is the primary overfitting-detection tool. By default it perturbs
+the BUY and SELL score thresholds independently around their defaults (`[55, 60, 65, 70, 75]` and
+`[20, 25, 30, 35, 40]`); passing an explicit `parameters` list additionally sweeps **indicator
+periods** — `rsi_period`, `sma_short`, `sma_long`, `macd_fast`, `macd_slow` — around their own
+defaults, using a bounded, sensible range per parameter (never an arbitrary caller-supplied grid).
+Each swept variant re-runs the backtest engine and is classified by the coefficient of variation
+(std/\|mean\|) of total return across all tested values: `HIGHER_ROBUSTNESS` (CV < 0.5),
+`LOW_ROBUSTNESS` (CV ≥ 0.5), **`PARAMETER_INERT`** when every tested value produced an identical
+result, or **`INSUFFICIENT_SAMPLE`** when the default configuration itself produced too few trades
+(< 5) to trust a robustness verdict from. The `PARAMETER_INERT` case is not a hypothetical: the
+current long/flat engine's entry/exit rule only checks whether the signal is BUY-class, so the
+SELL/STRONG_SELL boundary (`sell_threshold`) cannot change a single trade at any value — reporting
+that as "robust" would misrepresent "has no effect" as "stable performance," so it's called out
+explicitly instead (see
+`backend/tests/test_v3_sensitivity_and_oos.py::test_sensitivity_detects_inert_parameter`). Each
+parameter also reports `best_value`/`median_value`/`worst_value` (by total return) and a
+`robust_region` — the longest contiguous run of tested values (including the default) that keep the
+same return sign as the default.
 
-**Scope limit:** only the two score thresholds are perturbed, not indicator periods (RSI/SMA/MACD
-windows) — parameterizing those would require a deeper refactor of the indicator-computation
-pipeline. Documented here rather than silently omitted.
+**Indicator-period sensitivity is computed by a fully isolated code path**
+(`app/backtesting/parametrized_indicators.py`) that never touches the production indicator
+computation (`app.indicators.compute.compute_indicator_frame`) used by every live signal, backtest,
+walk-forward, Monte Carlo, and out-of-sample run. It is proven bit-for-bit equivalent to the
+production path *at default parameters* by a dedicated test
+(`test_default_params_match_standard_indicator_frame`) — the safety property the whole feature
+depends on.
+
+`POST /api/backtest/sensitivity/heatmap` runs a 2D grid over two parameters at once (e.g.
+`buy_threshold` × `rsi_period`) for the chosen metric, flagging any cell with fewer than 5 trades
+as `insufficient_sample` rather than coloring it as if it were reliable.
+
+**Scope limit:** Bollinger Band period/stddev, ATR period, ROC period, volume-SMA period, and
+signal-category weights are not (yet) perturbable — the bounded-range design above could be
+extended to them, but wasn't in this pass. Documented here rather than silently omitted.
 
 ## Walk-Forward Analysis
 
@@ -596,13 +629,115 @@ restarts without new infrastructure.
   fully auditable, not just a running P&L number.
 - **Portfolio risk dashboard** (`GET /api/paper-portfolio/risk`): exposure %, cash %, largest
   position %, and sector concentration (via each held ticker's real, live-fetched sector), with
-  threshold-based warnings (`HIGH_CONCENTRATION`, `LOW_CASH`, `HIGH_DRAWDOWN`). Portfolio-level
-  volatility/Sharpe/Sortino/beta/historical-drawdown are intentionally **not** included: they would
-  require a persisted daily equity-curve history that this lightweight ledger doesn't keep, and
-  approximating them without that history would mean reporting a number that isn't actually
-  measuring what it claims to. This is a documented scope limit, not an oversight.
+  threshold-based warnings (`HIGH_CONCENTRATION`, `LOW_CASH`, `HIGH_DRAWDOWN`).
+- **Persistent equity snapshot history** (`GET /api/paper-portfolio/history`): one **immutable**
+  observation per real trading day the portfolio was actually queried on, appended opportunistically
+  whenever the portfolio is loaded (there is no background scheduler). The trading day is keyed off
+  the benchmark's (SPY's) own daily bars, never wall-clock date, so a weekend, holiday, or a day the
+  portfolio was never viewed produces no entry — never a fabricated one. Each snapshot records
+  equity, cash, invested value, realized/unrealized/daily P&L, cumulative return, and a benchmark
+  value (SPY scaled proportionally from the portfolio's first recorded day). `daily_pnl` is
+  documented as the change since the previous *recorded* observation, which may span more than one
+  calendar day if the portfolio wasn't queried every day — never presented as a guaranteed
+  day-over-day figure it can't back up. This history is what makes portfolio-level volatility,
+  Sharpe, drawdown, and the Forward Validation page below possible; a resurgent-portfolio's
+  history is separated from the version of it before an explicit reset.
 
 Every API response and the UI both prominently label this feature as simulated.
+
+## Forward Validation (Paper Trading ≠ Backtesting)
+
+`GET /api/paper-portfolio/forward-validation` answers a **conceptually different question** from
+every backtest/out-of-sample/walk-forward page in this app:
+
+| | Backtest / Out-of-Sample / Walk-Forward | Forward Validation |
+|---|---|---|
+| Question | "How would this model have behaved on **past** data?" | "How does this model behave as **real, live** data arrives from now on?" |
+| Data | Replayed history | Only data that has actually occurred since the portfolio started |
+| Engine | `run_backtest()` | The paper-trading engine's own persisted equity snapshots |
+
+It reports start date, current date, trading days observed, model version (flagged `MIXED` if the
+portfolio's trades span more than one), current equity, total return, benchmark return, max
+drawdown (computed from the portfolio's *own* recorded equity curve, same peak-to-trough definition
+backtesting uses), trade count, and realized/unrealized P&L — and flags `insufficient_sample: true`
+under 20 observed trading days rather than presenting an early number as conclusive. The frontend
+page shows an explicit **"NO NEW MARKET DATA to chart yet"** state instead of any simulated or
+interpolated ticking when there aren't yet enough real observations to draw a line.
+
+## Portfolio Backtesting
+
+`POST /api/backtest/portfolio` extends backtesting from one ticker to a **basket of 2-20 tickers**,
+adding an allocation layer on top of the exact same per-ticker signals every other backtest uses
+(`app.signals.engine.evaluate` over `app.indicators.compute.compute_indicator_frame`) — this module
+never re-implements or duplicates that decision logic, only the choice of *which* signaling tickers
+to hold, at what weight, rebalanced how often.
+
+- **Allocation methods:** `EQUAL_WEIGHT` (default — investable capital split equally across every
+  BUY/STRONG_BUY-signaling ticker), `FIXED_WEIGHT` (caller-supplied target weights, renormalized
+  across only the currently-eligible tickers), `SIGNAL_WEIGHTED` (proportional to each ticker's own
+  0-100 score), `RISK_WEIGHTED` (inverse-historical-volatility — a standard, well-defined heuristic,
+  not a full risk-parity optimization).
+- **Rebalancing:** `DAILY`, `WEEKLY`, or `MONTHLY` (first trading day of the week/month). Target
+  weights are always decided from data through a day's **close** and executed at the **next**
+  trading day's **open**, with the same transaction-cost/slippage haircut single-ticker backtests
+  use — the same no-look-ahead contract, extended to a basket.
+- **Constraints:** `max_position_weight`/`min_position_weight` (a name that can't be funded at least
+  its minimum is dropped, not forced up), `max_holdings` (kept by highest score), `cash_allocation`
+  (a minimum cash buffer no rebalance may invest below), `sector_cap` (an over-cap sector is scaled
+  down proportionally; freed capital becomes cash, not redistributed to other sectors — a
+  conservative simplification, documented rather than silently assumed). Long-only, no leverage.
+- **Comparisons & risk analytics:** full metrics suite (CAGR, Sharpe, Sortino, Calmar, drawdown)
+  against an equal-weight buy-and-hold of the same basket and a benchmark; risk analytics include
+  exposure, cash %, largest position, top-3 concentration, sector concentration, and a **pairwise
+  correlation matrix computed from each holding's real historical daily RETURNS** (never price
+  levels, which are non-stationary and produce spurious correlation).
+
+**A real bug was found and fixed via live verification against AAPL/MSFT/NVDA** during this
+feature's development: target dollar amounts were originally sized off the rebalance *decision*
+day's stale close-based equity snapshot, then compared against *execution*-day open prices — so a
+holding already sitting exactly at its unchanged target weight could look artificially underfunded
+purely from the overnight price gap, producing a phantom "insufficient cash" warning (observed
+live: 16 of 36 monthly rebalances, one scaled to 0%, with no real allocation change needed). Fixed
+by sizing target dollars off the portfolio's actual value **at the execution moment** instead of a
+stale snapshot; see `test_unchanged_target_weight_produces_no_spurious_insufficient_cash_warning`.
+
+## Stock Comparison
+
+`POST /api/compare` (2-8 tickers) fans the exact same already-tested functions used everywhere else
+in the app — `market_data.get_overview`/`get_full_daily_history`, `compute_indicator_frame`,
+`signal_engine.evaluate`, `extract_fundamentals`, `compute_relative_strength` — out across tickers
+concurrently, and assembles one row per ticker covering market, technical, performance,
+fundamental, and model data. No new fetching or scoring logic, and **no cross-ticker normalization
+or ranking**: values are shown exactly as retrieved per ticker, documented explicitly rather than
+silently implying a methodology that doesn't exist. A field genuinely unavailable for a given
+ticker is `null` ("N/A" in the UI) — **never** defaulted to `0`, since `0` is itself a real,
+meaningful value (a genuine 0% margin) that must never be confused with missing data. One bad
+ticker reports its own `error` field without failing the rest of the comparison.
+
+A real unit-scaling bug was found and fixed via live verification: `HIST_VOL_20` is already computed
+as a percentage (see `app.indicators.volatility.historical_volatility`), but the comparison row
+multiplied it by 100 again, producing values like "1858%" annualized volatility for AAPL instead of
+the real ~18.6%. See `test_historical_volatility_is_not_double_scaled`.
+
+## Model Scorecard & Model-vs-Model Comparison
+
+`POST /api/model/scorecard` reports **five independent dimensions** — `OUT_OF_SAMPLE_STRENGTH`,
+`ROBUSTNESS`, `WALK_FORWARD_STABILITY`, `REGIME_DEPENDENCY`, `FORWARD_PAPER_DATA` — each labeled
+`STRONG`/`MODERATE`/`WEAK`/`INSUFFICIENT_DATA` (or `NOT_PROVIDED` for the forward-data dimension
+when no paper portfolio is supplied) directly from an already-tested engine's own output
+(out-of-sample validation, sensitivity analysis, walk-forward, regime-performance, and forward
+validation, respectively). **There is deliberately no default single composite score**: blending
+five dimensions that don't share a common unit into one number would hide exactly the kind of
+cross-dimension disagreement (e.g. strong in-sample results with unstable walk-forward folds) a
+scorecard exists to surface — the response includes a `composite_note` explaining this rather than
+a fabricated blended figure.
+
+`POST /api/model/compare-versions` runs the same backtest engine for both supported model versions
+(`1.0`, `1.1`) over an identical period, and — if forward paper-trading portfolio IDs are supplied
+for each — reports their real observed sample sizes and returns too. The methodology string
+explicitly disclaims any claim of statistical superiority: forward sample sizes are typically small
+enough that a few points of return difference between versions is ordinary noise, not evidence of a
+better model.
 
 ## No-Look-Ahead-Bias Guarantee
 
@@ -676,7 +811,8 @@ cd backend
 venv\Scripts\python -m pytest -q
 ```
 
-**248 tests** in `backend/tests/` cover: ticker validation, every indicator calculation (SMA, EMA,
+**349 tests** in `backend/tests/` (313 unit/component + 36 real-network integration) cover: ticker
+validation, every indicator calculation (SMA, EMA,
 RSI, MACD, Bollinger Bands, ATR, ROC, historical volatility, relative volume) plus the interpretation
 layer that turns them into UI text (regression-tested after a real bug where the Bollinger lower-band
 description was accidentally copied from the upper band), signal scoring and threshold mapping under
@@ -695,6 +831,21 @@ impossible High/Low relationships, negative volume, gaps, staleness), advanced p
 warnings, all with an isolated temp-directory store and mocked quotes), watchlist CRUD, and
 API-level tests (response shape, error mapping, disclaimer content) with `yfinance` calls
 monkeypatched for speed and determinism.
+
+**V4 additions:** indicator-period sensitivity (including the equivalence proof that the isolated
+parametrized-indicator path matches production output bit-for-bit at defaults) and its 2D heatmap;
+persistent paper-trading equity snapshots (append-only/no-duplicate/no-shrink invariants, benchmark
+proportionality, daily-P&L-since-last-recorded-observation semantics); the Forward Validation engine
+(insufficient-sample thresholds, mixed-model-version detection, drawdown from a real recorded
+curve); portfolio backtesting (no-look-ahead across a basket, cash/equity invariants under forced
+funding-shortfall stress, every allocation method, every constraint, and the funding-basis
+regression described in [Portfolio Backtesting](#portfolio-backtesting)); stock comparison
+(including the historical-volatility double-scaling regression); the Model Scorecard and
+model-vs-model comparison (dimension-labeling logic against each underlying engine's real output
+shape); and a dedicated timezone-regression file (`test_v4_timezone_regression.py`) that
+tz-localizes synthetic fixtures for every new V4 module that aligns dates across tickers or against
+a benchmark — a tz-naive fixture would not have caught any of the three prior real timezone bugs
+this project has hit, so it can't be trusted to catch a fourth.
 
 **The most important test file is `tests/test_v3_no_look_ahead.py`**: rather than only proving
 indicators are unaffected by *truncating* future data (the older, weaker test), it directly proves
@@ -759,17 +910,27 @@ development — the backend needs no API keys at all.
 
 Documented honestly rather than silently omitted:
 
-- **Parameter sensitivity** only perturbs the BUY/SELL score thresholds, not indicator periods
-  (RSI/SMA/EMA/MACD windows) or factor weights — see [Parameter Sensitivity & Robustness](#parameter-sensitivity--robustness).
-- **Portfolio-level paper-trading risk metrics** (volatility, Sharpe, Sortino, beta, historical
-  drawdown) are not computed - they'd need a persisted daily equity-curve history this lightweight
-  ledger doesn't keep. Exposure, cash %, concentration, and sector concentration are computed and
-  accurate. See [Paper Trading](#paper-trading).
-- **Portfolio-level (multi-ticker) backtesting** is not implemented - backtests, walk-forward,
-  sensitivity, out-of-sample, and Monte Carlo all operate on a single ticker at a time.
-- **Stock comparison** (side-by-side multi-ticker technical/fundamental/risk comparison) and a
-  unified "research workspace" navigation flow are not implemented as dedicated pages - the
-  underlying data for each is already available via the existing per-ticker endpoints.
+- **Parameter sensitivity** covers score thresholds and RSI/SMA/MACD periods, but not Bollinger
+  period/stddev, ATR period, ROC period, volume-SMA period, or signal-category weights - see
+  [Parameter Sensitivity & Robustness](#parameter-sensitivity--robustness).
+- **Portfolio-level paper-trading risk metrics** (volatility, Sharpe, drawdown) now have the
+  persisted daily equity-curve history they need (see [Paper Trading](#paper-trading) and
+  [Forward Validation](#forward-validation-paper-trading--backtesting)), but are surfaced there and
+  in the Model Scorecard rather than added to the original lightweight `GET /api/paper-portfolio/risk`
+  dashboard, which still reports exposure/cash/concentration only.
+- **Multiple concurrent forward-paper simulations** per model/strategy variant are supported only
+  through the existing `portfolio_id` mechanism (distinct IDs = distinct, independently-tracked
+  simulations with their own equity history) - there is no dedicated UI for creating/naming/listing
+  many simulations side by side yet.
+- **Portfolio backtesting constraint interactions** (e.g. a sector cap combined with a tight cash
+  allocation) are resolved by sequential waterfall passes documented in
+  [Portfolio Backtesting](#portfolio-backtesting), not a joint optimizer - correct and tested, but
+  not the global-optimum allocation a full solver would produce.
+- **Stock comparison** shows retrieved values side by side with no cross-ticker normalization or
+  ranking by design (see [Stock Comparison](#stock-comparison)) - there is no "which of these is
+  better" score, intentionally.
+- **The Model Scorecard** does not compute a default composite score across its five dimensions,
+  by design - see [Model Scorecard & Model-vs-Model Comparison](#model-scorecard--model-vs-model-comparison).
 - **Custom strategy parameters** (a UI for overriding thresholds/weights outside of the sensitivity
   endpoint, with an explicit "CUSTOM MODEL" label) are not exposed beyond the `model_version` and
   sensitivity-analysis paths already described above.
