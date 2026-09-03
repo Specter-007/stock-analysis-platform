@@ -523,6 +523,71 @@ export interface ComparisonRequestPayload {
   benchmark_ticker?: string;
 }
 
+export type ScorecardLabel = "STRONG" | "MODERATE" | "WEAK" | "INSUFFICIENT_DATA" | "NOT_PROVIDED";
+
+export interface ScorecardDimension {
+  name: string;
+  label: ScorecardLabel;
+  detail: string;
+  supporting_metrics: Record<string, number | string | null>;
+}
+
+export interface ScorecardResponse {
+  ticker: string;
+  model_version: string;
+  dimensions: ScorecardDimension[];
+  composite_note: string;
+  methodology: string;
+  meta: DataMeta;
+}
+
+export interface ScorecardRequestPayload {
+  ticker: string;
+  benchmark?: string;
+  initial_capital?: number;
+  transaction_cost_bps?: number;
+  slippage_bps?: number;
+  forward_portfolio_id?: string | null;
+}
+
+export interface ModelVersionBacktestSummary {
+  model_version: string;
+  total_return_percent: number | null;
+  cagr_percent: number | null;
+  sharpe_ratio: number | null;
+  max_drawdown_percent: number | null;
+  number_of_trades: number;
+  win_rate_percent: number | null;
+}
+
+export interface ModelVersionForwardSummary {
+  model_version: string;
+  portfolio_id: string;
+  trading_days_observed: number;
+  total_return_percent: number;
+  insufficient_sample: boolean;
+}
+
+export interface ModelComparisonResponse {
+  ticker: string;
+  backtest_comparison: ModelVersionBacktestSummary[];
+  forward_comparison: ModelVersionForwardSummary[];
+  methodology: string;
+  meta: DataMeta;
+}
+
+export interface ModelComparisonRequestPayload {
+  ticker: string;
+  start_date: string;
+  end_date: string;
+  initial_capital?: number;
+  transaction_cost_bps?: number;
+  slippage_bps?: number;
+  benchmark_ticker?: string;
+  forward_portfolio_id_v1?: string | null;
+  forward_portfolio_id_v2?: string | null;
+}
+
 export interface MonteCarloResponse {
   ticker: string;
   simulations: number;

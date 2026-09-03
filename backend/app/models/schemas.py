@@ -1046,3 +1046,86 @@ class ComparisonResponse(BaseModel):
     benchmark_ticker: str
     rows: list[ComparisonRowModel]
     methodology: str
+
+
+# ------------------------------------------------------------- Model Scorecard
+
+class ScorecardRequest(BaseModel):
+    ticker: str
+    benchmark: str = Field(default=DEFAULT_BENCHMARK_TICKER)
+    initial_capital: float = Field(default=DEFAULT_INITIAL_CAPITAL, gt=0)
+    transaction_cost_bps: float = Field(default=DEFAULT_TRANSACTION_COST_BPS, ge=0, le=1000)
+    slippage_bps: float = Field(default=DEFAULT_SLIPPAGE_BPS, ge=0, le=1000)
+    model_version: str = Field(default=MODEL_VERSION_CURRENT)
+    forward_portfolio_id: str | None = Field(default=None)
+
+    @field_validator("model_version")
+    @classmethod
+    def valid_model_version_scorecard(cls, v: str) -> str:
+        if v not in SUPPORTED_MODEL_VERSIONS:
+            return MODEL_VERSION_CURRENT
+        return v
+
+
+class ScorecardDimensionModel(BaseModel):
+    name: str
+    label: str
+    detail: str
+    supporting_metrics: dict
+
+
+class ScorecardResponse(BaseModel):
+    ticker: str
+    model_version: str
+    dimensions: list[ScorecardDimensionModel]
+    composite_note: str
+    methodology: str
+    meta: DataMeta
+
+
+# ------------------------------------------------------- Model vs Model
+
+class ModelComparisonRequest(BaseModel):
+    ticker: str
+    start_date: dt.date
+    end_date: dt.date
+    initial_capital: float = Field(default=DEFAULT_INITIAL_CAPITAL, gt=0)
+    transaction_cost_bps: float = Field(default=DEFAULT_TRANSACTION_COST_BPS, ge=0, le=1000)
+    slippage_bps: float = Field(default=DEFAULT_SLIPPAGE_BPS, ge=0, le=1000)
+    benchmark_ticker: str | None = Field(default=DEFAULT_BENCHMARK_TICKER)
+    forward_portfolio_id_v1: str | None = Field(default=None)
+    forward_portfolio_id_v2: str | None = Field(default=None)
+
+    @field_validator("end_date")
+    @classmethod
+    def end_after_start_model_comparison(cls, v: dt.date, info):
+        start = info.data.get("start_date")
+        if start is not None and v <= start:
+            raise ValueError("end_date must be after start_date.")
+        return v
+
+
+class ModelVersionBacktestSummary(BaseModel):
+    model_version: str
+    total_return_percent: float | None
+    cagr_percent: float | None
+    sharpe_ratio: float | None
+    max_drawdown_percent: float | None
+    number_of_trades: int
+    win_rate_percent: float | None
+
+
+class ModelVersionForwardSummary(BaseModel):
+    model_version: str
+    portfolio_id: str
+    trading_days_observed: int
+    total_return_percent: float
+    insufficient_sample: bool
+
+
+class ModelComparisonResponse(BaseModel):
+    ticker: str
+    backtest_comparison: list[ModelVersionBacktestSummary]
+    forward_comparison: list[ModelVersionForwardSummary]
+    methodology: str
+    meta: DataMeta

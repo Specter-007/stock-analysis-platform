@@ -4,6 +4,10 @@ import type {
   ComparisonRequestPayload,
   ComparisonResponse,
   FundamentalsResponse,
+  ModelComparisonRequestPayload,
+  ModelComparisonResponse,
+  ScorecardRequestPayload,
+  ScorecardResponse,
   HistoryResponse,
   MarketOverviewResponse,
   MarketRegimeResponse,
@@ -180,6 +184,22 @@ export function runPortfolioBacktest(payload: PortfolioBacktestRequestPayload, s
 
 export function compareStocks(payload: ComparisonRequestPayload, signal?: AbortSignal) {
   return apiFetch<ComparisonResponse>(`/api/compare`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export function getModelScorecard(payload: ScorecardRequestPayload, signal?: AbortSignal) {
+  return apiFetch<ScorecardResponse>(`/api/model/scorecard`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export function compareModelVersions(payload: ModelComparisonRequestPayload, signal?: AbortSignal) {
+  return apiFetch<ModelComparisonResponse>(`/api/model/compare-versions`, {
     method: "POST",
     body: JSON.stringify(payload),
     signal,

@@ -17,12 +17,21 @@ from app.config import (
 )
 from app.indicators.compute import compute_indicator_frame
 from app.market.regime_performance import compute_regime_performance
+from app.model_evaluation.comparison import compare_model_versions
+from app.model_evaluation.scorecard import build_model_scorecard
 from app.models.schemas import (
+    ModelComparisonRequest,
+    ModelComparisonResponse,
     ModelInfoResponse,
     ModelPerformanceResponse,
+    ModelVersionBacktestSummary,
+    ModelVersionForwardSummary,
     RegimeBucketModel,
     RegimePerformanceRequest,
     RegimePerformanceResponse,
+    ScorecardDimensionModel,
+    ScorecardRequest,
+    ScorecardResponse,
     SignalPerformanceGroupModel,
     SignalPerformanceHorizonModel,
     SignalStabilityModel,
@@ -206,5 +215,66 @@ def post_regime_performance(request: RegimePerformanceRequest):
         benchmark=result.benchmark,
         buckets=[RegimeBucketModel(**b.__dict__) for b in result.buckets],
         methodology=result.methodology,
+        meta=meta.to_dict(),
+    )
+
+
+@router.post("/scorecard", response_model=ScorecardResponse)
+def post_model_scorecard(request: ScorecardRequest):
+    ticker = normalize_and_validate_ticker(request.ticker)
+    benchmark = normalize_and_validate_ticker(request.benchmark)
+
+    full_df, meta = market_data.get_full_daily_history(ticker)
+    benchmark_df, _ = market_data.get_full_daily_history(benchmark)
+
+    result = build_model_scorecard(
+        ticker=ticker,
+        full_price_df=full_df,
+        benchmark=benchmark,
+        benchmark_full_price_df=benchmark_df,
+        initial_capital=request.initial_capital,
+        transaction_cost_bps=request.transaction_cost_bps,
+        slippage_bps=request.slippage_bps,
+        model_version=request.model_version,
+        forward_portfolio_id=request.forward_portfolio_id,
+    )
+
+    return ScorecardResponse(
+        ticker=result.ticker,
+        model_version=result.model_version,
+        dimensions=[ScorecardDimensionModel(**d.__dict__) for d in result.dimensions],
+        composite_note=result.composite_note,
+        methodology=result.methodology,
+        meta=meta.to_dict(),
+    )
+
+
+@router.post("/compare-versions", response_model=ModelComparisonResponse)
+def post_model_version_comparison(request: ModelComparisonRequest):
+    ticker = normalize_and_validate_ticker(request.ticker)
+    full_df, meta = market_data.get_full_daily_history(ticker)
+
+    forward_ids = {}
+    if request.forward_portfolio_id_v1:
+        forward_ids["1.0"] = request.forward_portfolio_id_v1
+    if request.forward_portfolio_id_v2:
+        forward_ids["1.1"] = request.forward_portfolio_id_v2
+
+    result = compare_model_versions(
+        ticker=ticker,
+        full_price_df=full_df,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        initial_capital=request.initial_capital,
+        transaction_cost_bps=request.transaction_cost_bps,
+        slippage_bps=request.slippage_bps,
+        forward_portfolio_ids=forward_ids,
+    )
+
+    return ModelComparisonResponse(
+        ticker=result["ticker"],
+        backtest_comparison=[ModelVersionBacktestSummary(**r) for r in result["backtest_comparison"]],
+        forward_comparison=[ModelVersionForwardSummary(**r) for r in result["forward_comparison"]],
+        methodology=result["methodology"],
         meta=meta.to_dict(),
     )

@@ -6,6 +6,8 @@ import { Card, CardHeader } from "@/components/ui/Card";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { SkeletonText } from "@/components/ui/Skeleton";
 import type { ApiError } from "@/lib/api";
+import { ModelScorecardPanel } from "./ModelScorecardPanel";
+import { ModelVersionComparisonPanel } from "./ModelVersionComparisonPanel";
 
 export default function ModelPageClient() {
   const { data, loading, error } = useApiResource((signal) => getModelInfo(signal), []);
@@ -28,6 +30,10 @@ export default function ModelPageClient() {
         </Card>
       ) : (
         <>
+          <ModelScorecardPanel />
+
+          <ModelVersionComparisonPanel />
+
           <Card>
             <CardHeader title="Version" subtitle={`Current: Quant Model v${data.current_version}`} />
             <div className="flex flex-col gap-3">
