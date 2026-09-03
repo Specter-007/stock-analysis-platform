@@ -366,6 +366,50 @@ export interface SensitivityHeatmapRequestPayload {
   metric: string;
 }
 
+export interface PaperEquitySnapshot {
+  date: string;
+  recorded_at: string;
+  equity: number;
+  cash: number;
+  invested_value: number;
+  realized_pnl: number;
+  unrealized_pnl: number;
+  cumulative_return_percent: number | null;
+  benchmark_value: number | null;
+  daily_pnl: number | null;
+  previous_snapshot_date: string | null;
+}
+
+export interface PaperEquityHistoryResponse {
+  portfolio_id: string;
+  starting_capital: number;
+  benchmark_ticker: string | null;
+  snapshots: PaperEquitySnapshot[];
+  methodology: string;
+}
+
+export interface ForwardValidationResponse {
+  portfolio_id: string;
+  model_version: string;
+  model_version_is_mixed: boolean;
+  start_date: string | null;
+  current_date: string | null;
+  trading_days_observed: number;
+  initial_capital: number;
+  current_equity: number;
+  total_return_percent: number;
+  benchmark_ticker: string | null;
+  benchmark_return_percent: number | null;
+  max_drawdown_percent: number | null;
+  number_of_trades: number;
+  open_positions_count: number;
+  realized_pnl: number;
+  unrealized_pnl: number;
+  insufficient_sample: boolean;
+  warnings: string[];
+  methodology: string;
+}
+
 export interface MonteCarloResponse {
   ticker: string;
   simulations: number;

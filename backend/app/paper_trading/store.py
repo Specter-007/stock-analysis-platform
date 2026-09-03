@@ -30,6 +30,15 @@ def _default_state(portfolio_id: str) -> dict:
         "cash": PAPER_TRADING_DEFAULT_CAPITAL,
         "positions": {},  # ticker -> {"shares": float, "avg_entry_price": float}
         "trades": [],  # list of trade dicts, oldest first
+        # Append-only forward-validation equity curve - one entry per real
+        # trading day the portfolio was actually observed on, never one per
+        # calendar day (weekends/holidays are never fabricated). See
+        # app.paper_trading.service._maybe_record_snapshot.
+        "equity_snapshots": [],
+        # Fixes the SPY price/date the benchmark curve is indexed from - set
+        # once, on this portfolio's first-ever snapshot, so "started with the
+        # same capital on the same day" holds for the life of the portfolio.
+        "benchmark_basis": None,
     }
 
 

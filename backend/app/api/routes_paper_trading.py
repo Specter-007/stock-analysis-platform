@@ -4,12 +4,16 @@ from fastapi import APIRouter, Query
 
 from app.config import PAPER_TRADING_DEFAULT_PORTFOLIO_ID
 from app.models.schemas import (
+    ForwardValidationResponse,
+    PaperEquityHistoryResponse,
+    PaperEquitySnapshotModel,
     PaperPortfolioResponse,
     PaperPositionModel,
     PaperRiskResponse,
     PaperTradeModel,
     PaperTradeRequest,
 )
+from app.paper_trading import forward_validation
 from app.paper_trading import risk as paper_risk
 from app.paper_trading import service as paper_trading_service
 
@@ -85,3 +89,20 @@ def get_paper_portfolio_risk(portfolio_id: str = Query(default=PAPER_TRADING_DEF
     view = paper_trading_service.get_portfolio(portfolio_id)
     result = paper_risk.assess_portfolio_risk(view)
     return PaperRiskResponse(**result.__dict__)
+
+
+@router.get("/paper-portfolio/history", response_model=PaperEquityHistoryResponse)
+def get_paper_portfolio_history(portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID)):
+    view = paper_trading_service.get_equity_history(portfolio_id)
+    return PaperEquityHistoryResponse(
+        portfolio_id=view.portfolio_id,
+        starting_capital=view.starting_capital,
+        benchmark_ticker=view.benchmark_ticker,
+        snapshots=[PaperEquitySnapshotModel(**s.__dict__) for s in view.snapshots],
+    )
+
+
+@router.get("/paper-portfolio/forward-validation", response_model=ForwardValidationResponse)
+def get_forward_validation(portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID)):
+    view = forward_validation.get_forward_validation(portfolio_id)
+    return ForwardValidationResponse(**view.__dict__)

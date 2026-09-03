@@ -10,6 +10,7 @@ import { ErrorState } from "@/components/ui/ErrorState";
 import { SkeletonText } from "@/components/ui/Skeleton";
 import { formatCurrency, formatPercent, formatPrice } from "@/lib/format";
 import type { PaperPortfolioResponse, PositionSizingMode } from "@/types/api";
+import { ForwardValidationPanel } from "./ForwardValidationPanel";
 
 const PORTFOLIO_ID = "default";
 
@@ -125,6 +126,8 @@ export default function PaperTradingPageClient() {
       ) : (
         <>
           <PortfolioOverview portfolio={data} />
+
+          <ForwardValidationPanel portfolioId={PORTFOLIO_ID} refreshKey={refreshKey} />
 
           {risk && risk.warnings.length > 0 && (
             <Card>

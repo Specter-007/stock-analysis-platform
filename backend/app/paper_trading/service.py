@@ -100,6 +100,29 @@ class PortfolioView:
     cash_percent: float = 100.0
 
 
+@dataclass
+class EquitySnapshotView:
+    date: str
+    recorded_at: str
+    equity: float
+    cash: float
+    invested_value: float
+    realized_pnl: float
+    unrealized_pnl: float
+    cumulative_return_percent: float | None
+    benchmark_value: float | None
+    daily_pnl: float | None
+    previous_snapshot_date: str | None
+
+
+@dataclass
+class EquityHistoryView:
+    portfolio_id: str
+    starting_capital: float
+    benchmark_ticker: str | None
+    snapshots: list[EquitySnapshotView] = field(default_factory=list)
+
+
 def _current_price(ticker: str) -> float | None:
     try:
         fast = market_data.fetch_fast_info_raw(ticker)
@@ -152,10 +175,97 @@ def _cost_breakdown(raw_entry: float, raw_exit: float, shares: float) -> dict:
     }
 
 
+BENCHMARK_TICKER = "SPY"
+
+
+def _latest_real_trading_day() -> tuple[dt.date | None, float | None]:
+    """The most recent trading day real market data actually exists for,
+    keyed off the benchmark's own daily bars - never wall-clock "today",
+    which could be a weekend/holiday with no real observation to record.
+    Returns (None, None) if market data is unavailable right now, in which
+    case no snapshot is recorded this cycle rather than fabricating one.
+    """
+    try:
+        bench_df, _ = market_data.get_full_daily_history(BENCHMARK_TICKER)
+        if bench_df.empty:
+            return None, None
+        last_row = bench_df.iloc[-1]
+        return bench_df.index[-1].date(), safe_float(last_row["Close"])
+    except Exception:
+        return None, None
+
+
+def _maybe_record_snapshot(portfolio_id: str, state: dict, view: PortfolioView) -> bool:
+    """Appends today's equity observation if (a) a real trading day is
+    available and (b) it hasn't already been recorded. Idempotent within a
+    trading day: calling this many times (once per page load) never creates
+    duplicate or updated entries for a day already captured - one immutable
+    observation per real trading day, matching backtest cadence.
+    """
+    trading_day, benchmark_close = _latest_real_trading_day()
+    if trading_day is None:
+        return False
+
+    snapshots = state.setdefault("equity_snapshots", [])
+    trading_day_str = trading_day.isoformat()
+    if snapshots and snapshots[-1]["date"] >= trading_day_str:
+        return False
+
+    basis = state.get("benchmark_basis")
+    if basis is None and benchmark_close is not None:
+        basis = {"date": trading_day_str, "price": benchmark_close}
+        state["benchmark_basis"] = basis
+
+    benchmark_value = None
+    if basis and basis.get("price") and benchmark_close is not None:
+        benchmark_value = state["starting_capital"] * (benchmark_close / basis["price"])
+
+    previous = snapshots[-1] if snapshots else None
+    daily_pnl = (view.current_value - previous["equity"]) if previous else None
+
+    cumulative_return_pct = (
+        (view.current_value / state["starting_capital"] - 1.0) * 100.0 if state["starting_capital"] else None
+    )
+
+    snapshots.append(
+        {
+            "date": trading_day_str,
+            "recorded_at": dt.datetime.now(tz=dt.timezone.utc).isoformat(),
+            "equity": round(view.current_value, 2),
+            "cash": round(view.cash, 2),
+            "invested_value": round(view.current_value - view.cash, 2),
+            "realized_pnl": round(view.realized_pnl, 2),
+            "unrealized_pnl": round(view.unrealized_pnl, 2),
+            "cumulative_return_percent": round(cumulative_return_pct, 2) if cumulative_return_pct is not None else None,
+            "benchmark_value": round(benchmark_value, 2) if benchmark_value is not None else None,
+            "daily_pnl": round(daily_pnl, 2) if daily_pnl is not None else None,
+            "previous_snapshot_date": previous["date"] if previous else None,
+        }
+    )
+    return True
+
+
 def get_portfolio(portfolio_id: str) -> PortfolioView:
     _apply_pending_exits(portfolio_id)
     state = load_portfolio(portfolio_id)
-    return _build_view(state)
+    view = _build_view(state)
+    if _maybe_record_snapshot(portfolio_id, state, view):
+        save_portfolio(portfolio_id, state)
+    return view
+
+
+def get_equity_history(portfolio_id: str) -> EquityHistoryView:
+    # Forces an opportunistic snapshot attempt for "today" before reading,
+    # so a fresh page load always reflects the latest available trading day
+    # rather than whatever was last recorded.
+    get_portfolio(portfolio_id)
+    state = load_portfolio(portfolio_id)
+    return EquityHistoryView(
+        portfolio_id=state["portfolio_id"],
+        starting_capital=state["starting_capital"],
+        benchmark_ticker=BENCHMARK_TICKER if state.get("benchmark_basis") else None,
+        snapshots=[EquitySnapshotView(**s) for s in state.get("equity_snapshots", [])],
+    )
 
 
 def _build_view(state: dict) -> PortfolioView:

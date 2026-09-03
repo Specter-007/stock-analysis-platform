@@ -7,8 +7,10 @@ import type {
   MarketRegimeResponse,
   ModelInfoResponse,
   ModelPerformanceResponse,
+  ForwardValidationResponse,
   MonteCarloRequestPayload,
   MonteCarloResponse,
+  PaperEquityHistoryResponse,
   PaperPortfolioResponse,
   SensitivityHeatmapRequestPayload,
   SensitivityHeatmapResponse,
@@ -197,6 +199,20 @@ export function closeAllPaperPositions(portfolioId = "default", signal?: AbortSi
   return apiFetch<PaperPortfolioResponse>(
     `/api/paper-portfolio/close-all?portfolio_id=${encodeURIComponent(portfolioId)}`,
     { method: "POST", signal }
+  );
+}
+
+export function getPaperEquityHistory(portfolioId = "default", signal?: AbortSignal) {
+  return apiFetch<PaperEquityHistoryResponse>(
+    `/api/paper-portfolio/history?portfolio_id=${encodeURIComponent(portfolioId)}`,
+    { signal }
+  );
+}
+
+export function getForwardValidation(portfolioId = "default", signal?: AbortSignal) {
+  return apiFetch<ForwardValidationResponse>(
+    `/api/paper-portfolio/forward-validation?portfolio_id=${encodeURIComponent(portfolioId)}`,
+    { signal }
   );
 }
 

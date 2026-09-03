@@ -732,6 +732,58 @@ class PaperRiskResponse(BaseModel):
     methodology: str
 
 
+class PaperEquitySnapshotModel(BaseModel):
+    date: str
+    recorded_at: str
+    equity: float
+    cash: float
+    invested_value: float
+    realized_pnl: float
+    unrealized_pnl: float
+    cumulative_return_percent: float | None
+    benchmark_value: float | None
+    daily_pnl: float | None
+    previous_snapshot_date: str | None
+
+
+class ForwardValidationResponse(BaseModel):
+    portfolio_id: str
+    model_version: str
+    model_version_is_mixed: bool
+    start_date: str | None
+    current_date: str | None
+    trading_days_observed: int
+    initial_capital: float
+    current_equity: float
+    total_return_percent: float
+    benchmark_ticker: str | None
+    benchmark_return_percent: float | None
+    max_drawdown_percent: float | None
+    number_of_trades: int
+    open_positions_count: int
+    realized_pnl: float
+    unrealized_pnl: float
+    insufficient_sample: bool
+    warnings: list[str]
+    methodology: str
+
+
+class PaperEquityHistoryResponse(BaseModel):
+    portfolio_id: str
+    starting_capital: float
+    benchmark_ticker: str | None
+    snapshots: list[PaperEquitySnapshotModel]
+    methodology: str = (
+        "One immutable observation per real trading day the portfolio was actually queried on "
+        "(keyed off the benchmark's own daily bars, never wall-clock date) - weekends, holidays, "
+        "and days this portfolio was never viewed produce no entry rather than a fabricated one. "
+        "daily_pnl is the change since the previous RECORDED observation, which may be more than "
+        "one trading day earlier if the portfolio wasn't queried every day - see "
+        "previous_snapshot_date on each entry. benchmark_value tracks what starting_capital would "
+        "be worth invested in the benchmark on this portfolio's first recorded day."
+    )
+
+
 # --------------------------------------------------------------- Model info
 
 class ModelInfoResponse(BaseModel):
