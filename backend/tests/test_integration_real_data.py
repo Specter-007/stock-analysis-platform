@@ -267,3 +267,106 @@ def test_real_backtest_runs_against_real_data():
     body = resp.json()
     assert body["final_capital"] > 0
     assert body["total_return_percent"] is not None
+
+
+# ---------------------------------------------------------------------- V4
+
+
+def test_real_sensitivity_extended_indicator_parameters():
+    resp = client.post(
+        "/api/backtest/sensitivity",
+        json={
+            "ticker": "AAPL", "start_date": "2022-01-01", "end_date": "2024-01-01",
+            "parameters": ["buy_threshold", "sell_threshold", "rsi_period", "sma_short", "sma_long", "macd_fast", "macd_slow"],
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["parameters"]) == 7
+    for p in body["parameters"]:
+        assert p["robustness"] in ("HIGHER_ROBUSTNESS", "LOW_ROBUSTNESS", "PARAMETER_INERT", "INSUFFICIENT_DATA", "INSUFFICIENT_SAMPLE")
+
+
+def test_real_sensitivity_heatmap():
+    resp = client.post(
+        "/api/backtest/sensitivity/heatmap",
+        json={
+            "ticker": "AAPL", "start_date": "2022-01-01", "end_date": "2024-01-01",
+            "param_x": "buy_threshold", "param_y": "rsi_period",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["cells"]) == 25
+
+
+def test_real_paper_portfolio_history_records_a_snapshot():
+    portfolio_id = "integration_test_history"
+    client.post(f"/api/paper-portfolio/reset?portfolio_id={portfolio_id}&starting_capital=10000")
+    resp = client.get(f"/api/paper-portfolio/history?portfolio_id={portfolio_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["snapshots"]) >= 1
+    assert body["snapshots"][0]["equity"] == pytest.approx(10000.0, abs=1.0)
+
+
+def test_real_forward_validation_reports_honest_sample_size():
+    portfolio_id = "integration_test_forward"
+    client.post(f"/api/paper-portfolio/reset?portfolio_id={portfolio_id}&starting_capital=10000")
+    resp = client.get(f"/api/paper-portfolio/forward-validation?portfolio_id={portfolio_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["trading_days_observed"] >= 1
+    assert body["insufficient_sample"] is True  # a brand-new portfolio never has enough history
+
+
+def test_real_portfolio_backtest_multi_ticker():
+    resp = client.post(
+        "/api/backtest/portfolio",
+        json={
+            "tickers": ["AAPL", "MSFT", "NVDA"],
+            "start_date": "2023-01-01", "end_date": "2024-01-01",
+            "initial_capital": 30000, "benchmark_ticker": "SPY",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["final_capital"] > 0
+    assert len(body["equity_curve"]) > 0
+    assert body["risk_analytics"]["correlation_matrix"] is not None
+
+
+def test_real_stock_comparison():
+    resp = client.post("/api/compare", json={"tickers": ["AAPL", "MSFT", "NVDA"]})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["rows"]) == 3
+    for row in body["rows"]:
+        assert row["error"] is None
+        assert row["signal"] in ("STRONG_BUY", "BUY", "HOLD", "SELL", "STRONG_SELL")
+        if row["historical_volatility_percent"] is not None:
+            assert 0 <= row["historical_volatility_percent"] < 500  # guards the double-scaling bug found in this phase
+
+
+def test_real_model_scorecard():
+    resp = client.post("/api/model/scorecard", json={"ticker": "AAPL", "benchmark": "SPY"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["dimensions"]) == 5
+    names = {d["name"] for d in body["dimensions"]}
+    assert names == {
+        "OUT_OF_SAMPLE_STRENGTH", "ROBUSTNESS", "WALK_FORWARD_STABILITY",
+        "REGIME_DEPENDENCY", "FORWARD_PAPER_DATA",
+    }
+    assert "composite_score" not in body
+
+
+def test_real_model_version_comparison():
+    resp = client.post(
+        "/api/model/compare-versions",
+        json={"ticker": "AAPL", "start_date": "2023-01-01", "end_date": "2024-01-01"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["backtest_comparison"]) == 2
+    assert {r["model_version"] for r in body["backtest_comparison"]} == {"1.0", "1.1"}
