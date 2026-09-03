@@ -1002,3 +1002,47 @@ class WatchlistResponse(BaseModel):
     watchlist_id: str
     tickers: list[str]
     entries: list[WatchlistEntryModel]
+
+
+# ---------------------------------------------------------------- Comparison
+
+class ComparisonRequest(BaseModel):
+    tickers: list[str] = Field(min_length=2, max_length=8)
+    benchmark_ticker: str = Field(default=DEFAULT_BENCHMARK_TICKER)
+
+
+class ComparisonRowModel(BaseModel):
+    ticker: str
+    error: str | None = None
+    company_name: str | None = None
+    sector: str | None = None
+    industry: str | None = None
+    last_price: float | None = None
+    change_percent: float | None = None
+    market_cap: float | None = None
+    trend_classification: str | None = None
+    rsi_14: float | None = None
+    dist_sma_50_pct: float | None = None
+    dist_sma_200_pct: float | None = None
+    historical_volatility_percent: float | None = None
+    return_1m_percent: float | None = None
+    return_3m_percent: float | None = None
+    return_6m_percent: float | None = None
+    return_1y_percent: float | None = None
+    relative_strength_1y_classification: str | None = None
+    trailing_pe: float | None = None
+    forward_pe: float | None = None
+    price_to_book: float | None = None
+    revenue_growth_percent: float | None = None
+    profit_margin_percent: float | None = None
+    return_on_equity_percent: float | None = None
+    signal: str | None = None
+    score: float | None = None
+    model_version: str | None = None
+
+
+class ComparisonResponse(BaseModel):
+    tickers: list[str]
+    benchmark_ticker: str
+    rows: list[ComparisonRowModel]
+    methodology: str

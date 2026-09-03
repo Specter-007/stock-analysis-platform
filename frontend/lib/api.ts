@@ -1,6 +1,8 @@
 import type {
   BacktestRequestPayload,
   BacktestResponse,
+  ComparisonRequestPayload,
+  ComparisonResponse,
   FundamentalsResponse,
   HistoryResponse,
   MarketOverviewResponse,
@@ -170,6 +172,14 @@ export function runSensitivityHeatmap(payload: SensitivityHeatmapRequestPayload,
 
 export function runPortfolioBacktest(payload: PortfolioBacktestRequestPayload, signal?: AbortSignal) {
   return apiFetch<PortfolioBacktestResponse>(`/api/backtest/portfolio`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export function compareStocks(payload: ComparisonRequestPayload, signal?: AbortSignal) {
+  return apiFetch<ComparisonResponse>(`/api/compare`, {
     method: "POST",
     body: JSON.stringify(payload),
     signal,

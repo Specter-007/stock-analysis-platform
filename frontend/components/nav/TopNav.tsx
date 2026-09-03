@@ -14,6 +14,7 @@ const NAV_LINKS = [
   { href: "/watchlist", label: "Watchlist" },
   { href: "/backtest", label: "Backtesting" },
   { href: "/portfolio", label: "Portfolio" },
+  { href: "/compare", label: "Compare" },
   { href: "/paper-trading", label: "Paper Trading" },
   { href: "/model", label: "Model" },
 ];

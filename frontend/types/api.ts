@@ -481,6 +481,48 @@ export interface PortfolioBacktestResponse {
   meta: DataMeta;
 }
 
+export interface ComparisonRow {
+  ticker: string;
+  error: string | null;
+  company_name: string | null;
+  sector: string | null;
+  industry: string | null;
+  last_price: number | null;
+  change_percent: number | null;
+  market_cap: number | null;
+  trend_classification: string | null;
+  rsi_14: number | null;
+  dist_sma_50_pct: number | null;
+  dist_sma_200_pct: number | null;
+  historical_volatility_percent: number | null;
+  return_1m_percent: number | null;
+  return_3m_percent: number | null;
+  return_6m_percent: number | null;
+  return_1y_percent: number | null;
+  relative_strength_1y_classification: string | null;
+  trailing_pe: number | null;
+  forward_pe: number | null;
+  price_to_book: number | null;
+  revenue_growth_percent: number | null;
+  profit_margin_percent: number | null;
+  return_on_equity_percent: number | null;
+  signal: string | null;
+  score: number | null;
+  model_version: string | null;
+}
+
+export interface ComparisonResponse {
+  tickers: string[];
+  benchmark_ticker: string;
+  rows: ComparisonRow[];
+  methodology: string;
+}
+
+export interface ComparisonRequestPayload {
+  tickers: string[];
+  benchmark_ticker?: string;
+}
+
 export interface MonteCarloResponse {
   ticker: string;
   simulations: number;
