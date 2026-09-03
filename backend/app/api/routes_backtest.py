@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import pandas as pd
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.backtesting.engine import BacktestResult, run_backtest
 from app.backtesting.monte_carlo import run_monte_carlo
 from app.backtesting.out_of_sample import run_out_of_sample_validation
-from app.backtesting.sensitivity import run_sensitivity_analysis
+from app.backtesting.sensitivity import (
+    ALL_PARAMETERS,
+    THRESHOLD_PARAMETERS,
+    run_sensitivity_analysis,
+    run_sensitivity_heatmap,
+)
 from app.backtesting.walk_forward import run_walk_forward
 from app.models.schemas import (
     BacktestRequest,
@@ -16,6 +21,9 @@ from app.models.schemas import (
     OutOfSampleRequest,
     OutOfSampleResponse,
     PeriodResultModel,
+    SensitivityHeatmapCellModel,
+    SensitivityHeatmapRequest,
+    SensitivityHeatmapResponse,
     SensitivityPointModel,
     SensitivityRequest,
     SensitivityResponse,
@@ -202,6 +210,12 @@ def post_sensitivity(request: SensitivityRequest):
     ticker = normalize_and_validate_ticker(request.ticker)
     full_df, meta = market_data.get_full_daily_history(ticker)
 
+    if request.parameters:
+        requested = tuple(p for p in request.parameters if p in ALL_PARAMETERS)
+        parameters = requested or THRESHOLD_PARAMETERS
+    else:
+        parameters = THRESHOLD_PARAMETERS
+
     result = run_sensitivity_analysis(
         ticker=ticker,
         full_price_df=full_df,
@@ -211,6 +225,7 @@ def post_sensitivity(request: SensitivityRequest):
         transaction_cost_bps=request.transaction_cost_bps,
         slippage_bps=request.slippage_bps,
         model_version=request.model_version,
+        parameters=parameters,
     )
 
     return SensitivityResponse(
@@ -219,15 +234,55 @@ def post_sensitivity(request: SensitivityRequest):
         parameters=[
             SensitivityResultModel(
                 parameter=p.parameter,
+                label=p.label,
                 default_value=p.default_value,
                 points=[SensitivityPointModel(**pt.__dict__) for pt in p.points],
                 robustness=p.robustness,
                 robust_region_min=p.robust_region_min,
                 robust_region_max=p.robust_region_max,
+                best_value=p.best_value,
+                median_value=p.median_value,
+                worst_value=p.worst_value,
                 note=p.note,
             )
             for p in result.parameters
         ],
+        methodology=result.methodology,
+        meta=meta.to_dict(),
+    )
+
+
+@router.post("/backtest/sensitivity/heatmap", response_model=SensitivityHeatmapResponse)
+def post_sensitivity_heatmap(request: SensitivityHeatmapRequest):
+    ticker = normalize_and_validate_ticker(request.ticker)
+    full_df, meta = market_data.get_full_daily_history(ticker)
+
+    if request.param_x not in ALL_PARAMETERS or request.param_y not in ALL_PARAMETERS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"param_x and param_y must both be one of: {', '.join(ALL_PARAMETERS)}",
+        )
+
+    result = run_sensitivity_heatmap(
+        ticker=ticker,
+        full_price_df=full_df,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        initial_capital=request.initial_capital,
+        transaction_cost_bps=request.transaction_cost_bps,
+        slippage_bps=request.slippage_bps,
+        param_x=request.param_x,
+        param_y=request.param_y,
+        metric=request.metric,
+        model_version=request.model_version,
+    )
+
+    return SensitivityHeatmapResponse(
+        ticker=result.ticker,
+        param_x=result.param_x,
+        param_y=result.param_y,
+        metric=result.metric,
+        cells=[SensitivityHeatmapCellModel(**c.__dict__) for c in result.cells],
         methodology=result.methodology,
         meta=meta.to_dict(),
     )

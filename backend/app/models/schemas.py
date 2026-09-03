@@ -461,6 +461,11 @@ class SensitivityRequest(BaseModel):
     transaction_cost_bps: float = Field(default=DEFAULT_TRANSACTION_COST_BPS, ge=0, le=1000)
     slippage_bps: float = Field(default=DEFAULT_SLIPPAGE_BPS, ge=0, le=1000)
     model_version: str = Field(default=MODEL_VERSION_CURRENT)
+    # None preserves V3 behavior (buy_threshold + sell_threshold only). Pass an
+    # explicit list - e.g. ["rsi_period", "sma_short"] - to sweep indicator
+    # periods too. Unknown names are silently dropped rather than erroring, so
+    # a typo degrades to "fewer parameters tested" instead of a 422.
+    parameters: list[str] | None = Field(default=None)
 
     @field_validator("model_version")
     @classmethod
@@ -491,11 +496,15 @@ class SensitivityPointModel(BaseModel):
 
 class SensitivityResultModel(BaseModel):
     parameter: str
+    label: str
     default_value: float
     points: list[SensitivityPointModel]
     robustness: str
     robust_region_min: float | None
     robust_region_max: float | None
+    best_value: float | None = None
+    median_value: float | None = None
+    worst_value: float | None = None
     note: str | None = None
 
 
@@ -503,6 +512,52 @@ class SensitivityResponse(BaseModel):
     ticker: str
     model_version: str
     parameters: list[SensitivityResultModel]
+    methodology: str
+    meta: DataMeta
+
+
+class SensitivityHeatmapRequest(BaseModel):
+    ticker: str
+    start_date: dt.date
+    end_date: dt.date
+    initial_capital: float = Field(default=DEFAULT_INITIAL_CAPITAL, gt=0)
+    transaction_cost_bps: float = Field(default=DEFAULT_TRANSACTION_COST_BPS, ge=0, le=1000)
+    slippage_bps: float = Field(default=DEFAULT_SLIPPAGE_BPS, ge=0, le=1000)
+    model_version: str = Field(default=MODEL_VERSION_CURRENT)
+    param_x: str = Field(default="buy_threshold")
+    param_y: str = Field(default="rsi_period")
+    metric: str = Field(default="cagr_percent")
+
+    @field_validator("model_version")
+    @classmethod
+    def valid_model_version_heatmap(cls, v: str) -> str:
+        if v not in SUPPORTED_MODEL_VERSIONS:
+            return MODEL_VERSION_CURRENT
+        return v
+
+    @field_validator("end_date")
+    @classmethod
+    def end_after_start_heatmap(cls, v: dt.date, info):
+        start = info.data.get("start_date")
+        if start is not None and v <= start:
+            raise ValueError("end_date must be after start_date.")
+        return v
+
+
+class SensitivityHeatmapCellModel(BaseModel):
+    x_value: float
+    y_value: float
+    metric_value: float | None
+    number_of_trades: int
+    insufficient_sample: bool
+
+
+class SensitivityHeatmapResponse(BaseModel):
+    ticker: str
+    param_x: str
+    param_y: str
+    metric: str
+    cells: list[SensitivityHeatmapCellModel]
     methodology: str
     meta: DataMeta
 

@@ -10,6 +10,10 @@ import type {
   MonteCarloRequestPayload,
   MonteCarloResponse,
   PaperPortfolioResponse,
+  SensitivityHeatmapRequestPayload,
+  SensitivityHeatmapResponse,
+  SensitivityRequestPayload,
+  SensitivityResponse,
   PaperRiskResponse,
   PaperTradeRequestPayload,
   WatchlistResponse,
@@ -138,6 +142,22 @@ export function runWalkForward(payload: WalkForwardRequestPayload, signal?: Abor
 
 export function runMonteCarlo(payload: MonteCarloRequestPayload, signal?: AbortSignal) {
   return apiFetch<MonteCarloResponse>(`/api/backtest/monte-carlo`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export function runSensitivity(payload: SensitivityRequestPayload, signal?: AbortSignal) {
+  return apiFetch<SensitivityResponse>(`/api/backtest/sensitivity`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export function runSensitivityHeatmap(payload: SensitivityHeatmapRequestPayload, signal?: AbortSignal) {
+  return apiFetch<SensitivityHeatmapResponse>(`/api/backtest/sensitivity/heatmap`, {
     method: "POST",
     body: JSON.stringify(payload),
     signal,

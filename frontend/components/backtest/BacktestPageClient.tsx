@@ -12,6 +12,7 @@ import { TradesTable } from "./TradesTable";
 import { ModelEvaluationPanel } from "./ModelEvaluationPanel";
 import { WalkForwardPanel } from "./WalkForwardPanel";
 import { MonteCarloPanel } from "./MonteCarloPanel";
+import { SensitivityPanel } from "./SensitivityPanel";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { DataFreshnessBadge } from "@/components/ui/DataFreshnessBadge";
@@ -131,6 +132,15 @@ export default function BacktestPageClient() {
           />
 
           <MonteCarloPanel
+            ticker={result.ticker}
+            startDate={result.start_date}
+            endDate={result.end_date}
+            initialCapital={result.initial_capital}
+            transactionCostBps={lastPayload?.transaction_cost_bps ?? 5}
+            slippageBps={lastPayload?.slippage_bps ?? 5}
+          />
+
+          <SensitivityPanel
             ticker={result.ticker}
             startDate={result.start_date}
             endDate={result.end_date}

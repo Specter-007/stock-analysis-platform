@@ -86,8 +86,13 @@ def run_backtest(
     benchmark_full_price_df: pd.DataFrame | None = None,
     model_version: str = MODEL_VERSION_CURRENT,
     thresholds: signal_engine.ScoreThresholds = signal_engine.DEFAULT_THRESHOLDS,
+    precomputed_indicator_df: pd.DataFrame | None = None,
 ) -> BacktestResult:
-    indicator_df = compute_indicator_frame(full_price_df)
+    # `precomputed_indicator_df` lets parameter-sensitivity analysis substitute
+    # indicator columns computed with non-default periods (see
+    # backtesting/parametrized_indicators.py) without this function - or the
+    # standard v1.0/v1.1 code path - ever needing to know about it.
+    indicator_df = precomputed_indicator_df if precomputed_indicator_df is not None else compute_indicator_frame(full_price_df)
     idx_dates = indicator_df.index
 
     sim_mask = (idx_dates.date >= start_date) & (idx_dates.date <= end_date)

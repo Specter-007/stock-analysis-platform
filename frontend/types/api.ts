@@ -286,6 +286,86 @@ export interface WalkForwardRequestPayload {
   slippage_bps: number;
 }
 
+export interface SensitivityPoint {
+  parameter: string;
+  value: number;
+  is_default: boolean;
+  total_return_percent: number | null;
+  cagr_percent: number | null;
+  sharpe_ratio: number | null;
+  max_drawdown_percent: number | null;
+  number_of_trades: number;
+}
+
+export type SensitivityRobustness =
+  | "HIGHER_ROBUSTNESS"
+  | "LOW_ROBUSTNESS"
+  | "INSUFFICIENT_DATA"
+  | "PARAMETER_INERT"
+  | "INSUFFICIENT_SAMPLE";
+
+export interface SensitivityResult {
+  parameter: string;
+  label: string;
+  default_value: number;
+  points: SensitivityPoint[];
+  robustness: SensitivityRobustness;
+  robust_region_min: number | null;
+  robust_region_max: number | null;
+  best_value: number | null;
+  median_value: number | null;
+  worst_value: number | null;
+  note: string | null;
+}
+
+export interface SensitivityResponse {
+  ticker: string;
+  model_version: string;
+  parameters: SensitivityResult[];
+  methodology: string;
+  meta: DataMeta;
+}
+
+export interface SensitivityRequestPayload {
+  ticker: string;
+  start_date: string;
+  end_date: string;
+  initial_capital: number;
+  transaction_cost_bps: number;
+  slippage_bps: number;
+  parameters?: string[];
+}
+
+export interface SensitivityHeatmapCell {
+  x_value: number;
+  y_value: number;
+  metric_value: number | null;
+  number_of_trades: number;
+  insufficient_sample: boolean;
+}
+
+export interface SensitivityHeatmapResponse {
+  ticker: string;
+  param_x: string;
+  param_y: string;
+  metric: string;
+  cells: SensitivityHeatmapCell[];
+  methodology: string;
+  meta: DataMeta;
+}
+
+export interface SensitivityHeatmapRequestPayload {
+  ticker: string;
+  start_date: string;
+  end_date: string;
+  initial_capital: number;
+  transaction_cost_bps: number;
+  slippage_bps: number;
+  param_x: string;
+  param_y: string;
+  metric: string;
+}
+
 export interface MonteCarloResponse {
   ticker: string;
   simulations: number;
