@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+import pandas as pd
 from fastapi import APIRouter
 
-from app.backtesting.engine import run_backtest
-from app.models.schemas import BacktestRequest, BacktestResponse
+from app.backtesting.engine import BacktestResult, run_backtest
+from app.backtesting.monte_carlo import run_monte_carlo
+from app.backtesting.walk_forward import run_walk_forward
+from app.models.schemas import (
+    BacktestRequest,
+    BacktestResponse,
+    MonteCarloRequest,
+    MonteCarloResponse,
+    WalkForwardFoldModel,
+    WalkForwardRequest,
+    WalkForwardResponse,
+)
 from app.services import market_data
 from app.utils.validation import normalize_and_validate_ticker
 
@@ -34,36 +45,20 @@ BACKTEST_METHODOLOGY = {
 }
 
 
-@router.post("/backtest", response_model=BacktestResponse)
-def post_backtest(request: BacktestRequest):
-    ticker = normalize_and_validate_ticker(request.ticker)
+def _resolve_benchmark(ticker: str, benchmark_ticker: str | None):
+    if not benchmark_ticker:
+        return None, None
+    normalized = normalize_and_validate_ticker(benchmark_ticker)
+    if normalized == ticker:
+        return None, None
+    try:
+        df, _ = market_data.get_full_daily_history(normalized)
+        return normalized, df
+    except Exception:
+        return None, None
 
-    full_df, meta = market_data.get_full_daily_history(ticker)
 
-    benchmark_ticker = None
-    benchmark_df = None
-    if request.benchmark_ticker:
-        benchmark_ticker = normalize_and_validate_ticker(request.benchmark_ticker)
-        if benchmark_ticker == ticker:
-            benchmark_ticker = None
-        else:
-            try:
-                benchmark_df, _ = market_data.get_full_daily_history(benchmark_ticker)
-            except Exception:
-                benchmark_df = None
-
-    result = run_backtest(
-        ticker=ticker,
-        full_price_df=full_df,
-        start_date=request.start_date,
-        end_date=request.end_date,
-        initial_capital=request.initial_capital,
-        transaction_cost_bps=request.transaction_cost_bps,
-        slippage_bps=request.slippage_bps,
-        benchmark_ticker=benchmark_ticker,
-        benchmark_full_price_df=benchmark_df,
-    )
-
+def _to_backtest_response(result: BacktestResult, meta_dict: dict) -> BacktestResponse:
     return BacktestResponse(
         ticker=result.ticker,
         start_date=result.start_date,
@@ -94,5 +89,99 @@ def post_backtest(request: BacktestRequest):
         drawdown_curve=[p.__dict__ for p in result.drawdown_curve],
         warnings=result.warnings,
         methodology=BACKTEST_METHODOLOGY,
+        model_version=result.model_version,
+        meta=meta_dict,
+    )
+
+
+@router.post("/backtest", response_model=BacktestResponse)
+def post_backtest(request: BacktestRequest):
+    ticker = normalize_and_validate_ticker(request.ticker)
+    full_df, meta = market_data.get_full_daily_history(ticker)
+    benchmark_ticker, benchmark_df = _resolve_benchmark(ticker, request.benchmark_ticker)
+
+    result = run_backtest(
+        ticker=ticker,
+        full_price_df=full_df,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        initial_capital=request.initial_capital,
+        transaction_cost_bps=request.transaction_cost_bps,
+        slippage_bps=request.slippage_bps,
+        benchmark_ticker=benchmark_ticker,
+        benchmark_full_price_df=benchmark_df,
+        model_version=request.model_version,
+    )
+
+    return _to_backtest_response(result, meta.to_dict())
+
+
+@router.post("/backtest/walk-forward", response_model=WalkForwardResponse)
+def post_walk_forward(request: WalkForwardRequest):
+    ticker = normalize_and_validate_ticker(request.ticker)
+    full_df, meta = market_data.get_full_daily_history(ticker)
+
+    result = run_walk_forward(
+        ticker=ticker,
+        full_price_df=full_df,
+        train_years=request.train_years,
+        test_years=request.test_years,
+        max_folds=request.max_folds,
+        initial_capital=request.initial_capital,
+        transaction_cost_bps=request.transaction_cost_bps,
+        slippage_bps=request.slippage_bps,
+    )
+
+    return WalkForwardResponse(
+        ticker=result.ticker,
+        train_years=result.train_years,
+        test_years=result.test_years,
+        folds=[WalkForwardFoldModel(**f.__dict__) for f in result.folds],
+        folds_with_positive_return=result.folds_with_positive_return,
+        average_test_return_percent=result.average_test_return_percent,
+        methodology=result.methodology,
+        meta=meta.to_dict(),
+    )
+
+
+@router.post("/backtest/monte-carlo", response_model=MonteCarloResponse)
+def post_monte_carlo(request: MonteCarloRequest):
+    ticker = normalize_and_validate_ticker(request.ticker)
+    full_df, meta = market_data.get_full_daily_history(ticker)
+
+    backtest_result = run_backtest(
+        ticker=ticker,
+        full_price_df=full_df,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        initial_capital=request.initial_capital,
+        transaction_cost_bps=request.transaction_cost_bps,
+        slippage_bps=request.slippage_bps,
+    )
+
+    equity_series = pd.Series(
+        {p.date: p.equity for p in backtest_result.strategy_curve}
+    )
+    daily_returns = equity_series.pct_change()
+
+    mc_result = run_monte_carlo(
+        trades=backtest_result.trades,
+        daily_returns=daily_returns,
+        initial_capital=request.initial_capital,
+        num_simulations=request.simulations,
+        seed=request.seed,
+    )
+
+    return MonteCarloResponse(
+        ticker=ticker,
+        simulations=mc_result.simulations,
+        resampling_basis=mc_result.resampling_basis,
+        sample_size=mc_result.sample_size,
+        median_return_percent=mc_result.median_return_percent,
+        percentile_5_return_percent=mc_result.percentile_5_return_percent,
+        percentile_95_return_percent=mc_result.percentile_95_return_percent,
+        median_max_drawdown_percent=mc_result.median_max_drawdown_percent,
+        worst_max_drawdown_percent=mc_result.worst_max_drawdown_percent,
+        methodology=mc_result.methodology,
         meta=meta.to_dict(),
     )

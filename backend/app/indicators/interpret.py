@@ -142,15 +142,28 @@ def build_volatility_indicators(row: pd.Series, regime: str) -> list[dict]:
         out.append(_unavailable("bb_middle", "Bollinger Middle Band", "$"))
         out.append(_unavailable("bb_lower", "Bollinger Lower Band", "$"))
     else:
-        if close >= upper:
-            band_status, band_note = "warning", "Price at/above the upper band — potentially overbought."
-        elif close <= lower:
-            band_status, band_note = "warning", "Price at/below the lower band — potentially oversold."
-        else:
-            band_status, band_note = "neutral", "Price trading within the bands."
-        out.append(_iv("bb_upper", "Bollinger Upper Band", round(upper, 2), "$", band_note, band_status))
-        out.append(_iv("bb_middle", "Bollinger Middle Band (SMA 20)", round(middle, 2), "$", "20-day moving average.", "neutral"))
-        out.append(_iv("bb_lower", "Bollinger Lower Band", round(lower, 2), "$", band_note, band_status))
+        breached_upper = close >= upper
+        breached_lower = close <= lower
+
+        upper_status = "warning" if breached_upper else "neutral"
+        upper_note = (
+            "Price is at/above the upper band — potentially overbought."
+            if breached_upper
+            else f"Price is ${upper - close:.2f} below the upper band."
+        )
+        out.append(_iv("bb_upper", "Bollinger Upper Band", round(upper, 2), "$", upper_note, upper_status))
+
+        out.append(
+            _iv("bb_middle", "Bollinger Middle Band (SMA 20)", round(middle, 2), "$", "20-day moving average.", "neutral")
+        )
+
+        lower_status = "warning" if breached_lower else "neutral"
+        lower_note = (
+            "Price is at/below the lower band — potentially oversold."
+            if breached_lower
+            else f"Price is ${close - lower:.2f} above the lower band."
+        )
+        out.append(_iv("bb_lower", "Bollinger Lower Band", round(lower, 2), "$", lower_note, lower_status))
 
     hv = safe_float(row.get("HIST_VOL_20"))
     if hv is None:

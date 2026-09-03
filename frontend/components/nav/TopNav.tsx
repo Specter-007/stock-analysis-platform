@@ -10,8 +10,10 @@ import { TickerSearch } from "@/components/search/TickerSearch";
 const NAV_LINKS = [
   { href: "/", label: "Overview" },
   { href: "/markets", label: "Markets" },
-  { href: "/analysis", label: "Stock Analysis" },
+  { href: "/analysis", label: "Analysis" },
   { href: "/backtest", label: "Backtesting" },
+  { href: "/paper-trading", label: "Paper Trading" },
+  { href: "/model", label: "Model" },
 ];
 
 export default function TopNav() {

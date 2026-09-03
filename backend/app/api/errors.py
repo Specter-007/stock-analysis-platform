@@ -6,6 +6,7 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app.paper_trading.service import PaperTradingError
 from app.services.exceptions import DataUnavailableError, InsufficientHistoryError, TickerNotFoundError
 from app.utils.validation import InvalidTickerError
 
@@ -17,6 +18,10 @@ def _error_body(error_type: str, detail: str) -> dict:
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(PaperTradingError)
+    async def paper_trading_error_handler(request: Request, exc: PaperTradingError):
+        return JSONResponse(status_code=400, content=_error_body("PAPER_TRADING_ERROR", str(exc)))
+
     @app.exception_handler(InvalidTickerError)
     async def invalid_ticker_handler(request: Request, exc: InvalidTickerError):
         return JSONResponse(status_code=400, content=_error_body("INVALID_TICKER", str(exc)))

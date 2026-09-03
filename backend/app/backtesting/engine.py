@@ -27,6 +27,7 @@ import pandas as pd
 
 from app.backtesting import metrics as m
 from app.backtesting.metrics import Trade
+from app.config import MODEL_VERSION_CURRENT
 from app.indicators.compute import compute_indicator_frame
 from app.services.exceptions import InsufficientHistoryError
 from app.signals import engine as signal_engine
@@ -56,6 +57,7 @@ class BacktestResult:
     sharpe_ratio: float | None
     trading_days: int
     open_position_at_end: bool
+    model_version: str = "1.1"
     trades: list[Trade] = field(default_factory=list)
     strategy_curve: list[EquityPoint] = field(default_factory=list)
     buy_hold_curve: list[EquityPoint] = field(default_factory=list)
@@ -81,6 +83,7 @@ def run_backtest(
     slippage_bps: float,
     benchmark_ticker: str | None = None,
     benchmark_full_price_df: pd.DataFrame | None = None,
+    model_version: str = MODEL_VERSION_CURRENT,
 ) -> BacktestResult:
     indicator_df = compute_indicator_frame(full_price_df)
     idx_dates = indicator_df.index
@@ -156,7 +159,7 @@ def run_backtest(
 
         historical_slice = indicator_df.loc[:date]
         try:
-            sig = signal_engine.evaluate(historical_slice)
+            sig = signal_engine.evaluate(historical_slice, model_version=model_version)
             desired_long = sig.signal in ("BUY", "STRONG_BUY")
         except Exception:
             desired_long = in_position
@@ -225,6 +228,7 @@ def run_backtest(
         sharpe_ratio=(round(sr, 3) if (sr := m.sharpe_ratio(daily_returns)) is not None else None),
         trading_days=trading_days,
         open_position_at_end=open_position_at_end,
+        model_version=model_version,
         trades=trades,
         strategy_curve=[EquityPoint(date=str(d.date()), equity=round(v, 2)) for d, v in equity_series.items()],
         buy_hold_curve=[EquityPoint(date=str(d.date()), equity=round(float(v), 2)) for d, v in buy_hold_series.items()],

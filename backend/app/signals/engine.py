@@ -17,6 +17,9 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from app.config import (
+    MODEL_VERSION_CURRENT,
+    RAW_SCORE_FIXED_MAX,
+    RAW_SCORE_FIXED_MIN,
     SCORE_BUY,
     SCORE_HOLD_LOW,
     SCORE_SELL_LOW,
@@ -25,6 +28,8 @@ from app.config import (
 from app.indicators.compute import classify_trend, classify_volatility_regime, safe_float
 
 Polarity = str  # "positive" | "negative" | "neutral"
+
+CATEGORIES = ("Trend", "Momentum", "Volume", "Volatility")
 
 
 @dataclass
@@ -36,6 +41,8 @@ class ScoreFactor:
     max_points: float
     detail: str
     polarity: Polarity
+    current_value: float | None = None
+    threshold_label: str = ""
 
 
 @dataclass
@@ -45,6 +52,7 @@ class SignalResult:
     raw_score: float
     raw_min: float
     raw_max: float
+    model_version: str = MODEL_VERSION_CURRENT
     factors: list[ScoreFactor] = field(default_factory=list)
     trend_classification: str = "Insufficient Data"
     volatility_regime: str = "Insufficient Data"
@@ -60,6 +68,23 @@ class SignalResult:
     @property
     def neutral_factors(self) -> list[ScoreFactor]:
         return [f for f in self.factors if f.polarity == "neutral"]
+
+    @property
+    def category_breakdown(self) -> dict[str, float]:
+        """Sum of raw points contributed by each category, plus 'Other' for
+        any factor category not in the standard four (keeps this forward
+        compatible if a new category is ever added).
+        """
+        breakdown = {c: 0.0 for c in CATEGORIES}
+        other = 0.0
+        for f in self.factors:
+            if f.category in breakdown:
+                breakdown[f.category] += f.points
+            else:
+                other += f.points
+        if other:
+            breakdown["Other"] = other
+        return breakdown
 
 
 def _polarity(points: float) -> Polarity:
@@ -93,6 +118,8 @@ def _trend_factors(row: pd.Series) -> list[ScoreFactor]:
                     f"the 200-day SMA (${sma200:.2f})."
                 ),
                 polarity=_polarity(pts),
+                current_value=close,
+                threshold_label=f"Price > SMA 200 (${sma200:.2f})",
             )
         )
 
@@ -112,6 +139,8 @@ def _trend_factors(row: pd.Series) -> list[ScoreFactor]:
                     f"({'golden' if bullish else 'death'}-cross alignment)."
                 ),
                 polarity=_polarity(pts),
+                current_value=sma50,
+                threshold_label=f"SMA 50 > SMA 200 (${sma200:.2f})",
             )
         )
 
@@ -130,6 +159,8 @@ def _trend_factors(row: pd.Series) -> list[ScoreFactor]:
                     f"the 50-day SMA (${sma50:.2f})."
                 ),
                 polarity=_polarity(pts),
+                current_value=sma20,
+                threshold_label=f"SMA 20 > SMA 50 (${sma50:.2f})",
             )
         )
 
@@ -160,6 +191,8 @@ def _rsi_factor(row: pd.Series) -> ScoreFactor | None:
         max_points=10,
         detail=f"RSI is {rsi:.1f} — {label}.",
         polarity=_polarity(pts),
+        current_value=rsi,
+        threshold_label="RSI 50-70 healthy bullish; >70 overbought; <30 oversold",
     )
 
 
@@ -189,6 +222,8 @@ def _macd_factor(row: pd.Series) -> ScoreFactor | None:
         max_points=15,
         detail=f"MACD ({macd_line:.2f}) vs. signal ({signal_line:.2f}): {label}.",
         polarity=_polarity(pts),
+        current_value=macd_line,
+        threshold_label=f"MACD > signal ({signal_line:.2f}) and MACD > 0",
     )
 
 
@@ -212,6 +247,8 @@ def _roc_factor(row: pd.Series) -> ScoreFactor | None:
         max_points=5,
         detail=f"12-period ROC is {roc:+.2f}%.",
         polarity=_polarity(pts),
+        current_value=roc,
+        threshold_label="ROC > +1% bullish; < -1% bearish",
     )
 
 
@@ -246,6 +283,8 @@ def _volume_factor(indicator_df: pd.DataFrame) -> ScoreFactor | None:
             f"daily move — {label}."
         ),
         polarity=_polarity(pts),
+        current_value=rel_vol,
+        threshold_label="Relative volume > 1.2x average, confirming the day's price direction",
     )
 
 
@@ -269,6 +308,8 @@ def _volatility_factor(indicator_df: pd.DataFrame, regime: str) -> ScoreFactor |
         max_points=5,
         detail=f"Volatility regime is {regime} — {label}.",
         polarity=_polarity(pts),
+        current_value=None,
+        threshold_label="Low/Normal regime rewarded; Elevated/Extreme penalized",
     )
 
 
@@ -284,13 +325,21 @@ def score_to_signal(score: float) -> str:
     return "STRONG_SELL"
 
 
-def evaluate(indicator_df: pd.DataFrame) -> SignalResult:
+def evaluate(indicator_df: pd.DataFrame, model_version: str = MODEL_VERSION_CURRENT) -> SignalResult:
     """Evaluate the deterministic signal at the LAST row of `indicator_df`.
 
     `indicator_df` must already contain the columns produced by
     `app.indicators.compute.compute_indicator_frame`. The caller is
     responsible for ensuring the frame contains no data from after the
     evaluation point (critical for backtesting - see backtesting/engine.py).
+
+    `model_version`:
+      - "1.1" (default) - raw score normalized against the FIXED theoretical
+        min/max across all 8 possible factors. The same factor condition
+        contributes the same normalized amount for every ticker.
+      - "1.0" (legacy) - raw score normalized against the min/max of only
+        the factors available for THIS ticker. Kept for backward-compatible
+        reference; never silently substituted for v1.1 results.
     """
     if indicator_df.empty:
         raise ValueError("Cannot evaluate signal on an empty indicator frame.")
@@ -314,8 +363,13 @@ def evaluate(indicator_df: pd.DataFrame) -> SignalResult:
         factors.append(volat_factor)
 
     raw_score = sum(f.points for f in factors)
-    raw_min = sum(f.min_points for f in factors)
-    raw_max = sum(f.max_points for f in factors)
+
+    if model_version == "1.0":
+        raw_min = sum(f.min_points for f in factors)
+        raw_max = sum(f.max_points for f in factors)
+    else:
+        raw_min = RAW_SCORE_FIXED_MIN
+        raw_max = RAW_SCORE_FIXED_MAX
 
     if raw_max == raw_min:
         normalized = 50.0
@@ -329,6 +383,7 @@ def evaluate(indicator_df: pd.DataFrame) -> SignalResult:
         raw_score=raw_score,
         raw_min=raw_min,
         raw_max=raw_max,
+        model_version=model_version,
         factors=factors,
         trend_classification=classify_trend(row),
         volatility_regime=regime,

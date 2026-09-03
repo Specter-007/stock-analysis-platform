@@ -3,13 +3,28 @@
 import { useCallback, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Search } from "lucide-react";
-import { getStockHistory, getStockOverview, getStockSignal, getStockTechnical } from "@/lib/api";
+import {
+  getFundamentals,
+  getMarketRegime,
+  getRelativeStrength,
+  getSectorComparison,
+  getSignalHistory,
+  getStockHistory,
+  getStockOverview,
+  getStockSignal,
+  getStockTechnical,
+} from "@/lib/api";
 import { useApiResource } from "@/hooks/useApiResource";
 import { PriceHeader } from "@/components/stock/PriceHeader";
 import { PriceChart } from "@/components/stock/PriceChart";
 import { SignalCard } from "@/components/stock/SignalCard";
 import { FactorsList } from "@/components/stock/FactorsList";
+import { ScoreBreakdown } from "@/components/stock/ScoreBreakdown";
+import { StabilityPanel, InvalidationPanel } from "@/components/stock/StabilityAndInvalidation";
+import { SignalHistoryPanel } from "@/components/stock/SignalHistoryPanel";
 import { IndicatorPanel } from "@/components/stock/IndicatorPanel";
+import { FundamentalsPanel } from "@/components/stock/FundamentalsPanel";
+import { MarketRegimePanel, RelativeStrengthPanel, SectorComparisonPanel } from "@/components/stock/MarketContextPanel";
 import { RiskPanel } from "@/components/stock/RiskPanel";
 import { CompanyInfo } from "@/components/stock/CompanyInfo";
 import { TickerSearch } from "@/components/search/TickerSearch";
@@ -25,26 +40,15 @@ export default function AnalysisPageClient() {
   const ticker = rawTicker ? rawTicker.trim().toUpperCase() : null;
   const [range, setRange] = useState<ChartRange>("1Y");
 
-  const overview = useApiResource(
-    (signal) => getStockOverview(ticker!, signal),
-    [ticker],
-    !!ticker
-  );
-  const history = useApiResource(
-    (signal) => getStockHistory(ticker!, range, signal),
-    [ticker, range],
-    !!ticker
-  );
-  const technical = useApiResource(
-    (signal) => getStockTechnical(ticker!, signal),
-    [ticker],
-    !!ticker
-  );
-  const signalResource = useApiResource(
-    (signal) => getStockSignal(ticker!, signal),
-    [ticker],
-    !!ticker
-  );
+  const overview = useApiResource((signal) => getStockOverview(ticker!, signal), [ticker], !!ticker);
+  const history = useApiResource((signal) => getStockHistory(ticker!, range, signal), [ticker, range], !!ticker);
+  const technical = useApiResource((signal) => getStockTechnical(ticker!, signal), [ticker], !!ticker);
+  const signalResource = useApiResource((signal) => getStockSignal(ticker!, signal), [ticker], !!ticker);
+  const signalHistory = useApiResource((signal) => getSignalHistory(ticker!, 60, signal), [ticker], !!ticker);
+  const fundamentals = useApiResource((signal) => getFundamentals(ticker!, signal), [ticker], !!ticker);
+  const relativeStrength = useApiResource((signal) => getRelativeStrength(ticker!, "SPY", signal), [ticker], !!ticker);
+  const sectorComparison = useApiResource((signal) => getSectorComparison(ticker!, signal), [ticker], !!ticker);
+  const marketRegime = useApiResource((signal) => getMarketRegime(signal), [ticker], !!ticker);
 
   const retryAll = useCallback(() => {
     // Re-triggering is handled naturally by React Router's key-based effect
@@ -95,9 +99,16 @@ export default function AnalysisPageClient() {
             neutral={signalResource.data.neutral_factors}
             confidence={signalResource.data.confidence}
           />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <ScoreBreakdown breakdown={signalResource.data.score_breakdown} score={signalResource.data.score} />
+            <StabilityPanel stability={signalResource.data.stability} />
+          </div>
+          <InvalidationPanel conditions={signalResource.data.invalidation_conditions} />
           <RiskPanel risk={signalResource.data.risk} />
         </>
       )}
+
+      {signalHistory.data && !signalHistory.error && <SignalHistoryPanel history={signalHistory.data.history} />}
 
       {technical.error ? (
         <ErrorState error={technical.error as ApiError} onRetry={retryAll} />
@@ -108,6 +119,15 @@ export default function AnalysisPageClient() {
       ) : (
         <IndicatorPanel technical={technical.data} />
       )}
+
+      {fundamentals.data && !fundamentals.error && <FundamentalsPanel fundamentals={fundamentals.data} />}
+
+      {relativeStrength.data && !relativeStrength.error && <RelativeStrengthPanel data={relativeStrength.data} />}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {marketRegime.data && !marketRegime.error && <MarketRegimePanel regime={marketRegime.data} />}
+        {sectorComparison.data && !sectorComparison.error && <SectorComparisonPanel data={sectorComparison.data} />}
+      </div>
 
       {overview.data && <CompanyInfo data={overview.data.data} />}
     </div>

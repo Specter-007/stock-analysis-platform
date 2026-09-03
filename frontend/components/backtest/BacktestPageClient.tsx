@@ -9,6 +9,8 @@ import { MetricsGrid } from "./MetricsGrid";
 import { EquityChart } from "./EquityChart";
 import { DrawdownChart } from "./DrawdownChart";
 import { TradesTable } from "./TradesTable";
+import { WalkForwardPanel } from "./WalkForwardPanel";
+import { MonteCarloPanel } from "./MonteCarloPanel";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { DataFreshnessBadge } from "@/components/ui/DataFreshnessBadge";
@@ -117,6 +119,22 @@ export default function BacktestPageClient() {
               ))}
             </dl>
           </Card>
+
+          <WalkForwardPanel
+            ticker={result.ticker}
+            initialCapital={result.initial_capital}
+            transactionCostBps={lastPayload?.transaction_cost_bps ?? 5}
+            slippageBps={lastPayload?.slippage_bps ?? 5}
+          />
+
+          <MonteCarloPanel
+            ticker={result.ticker}
+            startDate={result.start_date}
+            endDate={result.end_date}
+            initialCapital={result.initial_capital}
+            transactionCostBps={lastPayload?.transaction_cost_bps ?? 5}
+            slippageBps={lastPayload?.slippage_bps ?? 5}
+          />
         </>
       )}
     </div>

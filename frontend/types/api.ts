@@ -89,6 +89,8 @@ export interface ScoreFactor {
   points: number;
   detail: string;
   polarity: "positive" | "negative" | "neutral";
+  current_value: number | null;
+  threshold_label: string;
 }
 
 export interface Confidence {
@@ -108,10 +110,47 @@ export interface Risk {
   atr_percent_of_price: number | null;
 }
 
+export interface SignalChange {
+  date: string;
+  previous_signal: SignalLabel;
+  current_signal: SignalLabel;
+  previous_score: number;
+  current_score: number;
+  contributing_changes: string[];
+}
+
+export interface SignalStability {
+  stability_percent: number;
+  window_sessions: number;
+  recent_signals: SignalLabel[];
+  methodology: string;
+}
+
+export interface FundamentalScoreFactor {
+  key: string;
+  label: string;
+  value: number | null;
+  healthy: boolean | null;
+  points: number;
+  max_points: number;
+}
+
+export interface OverallScore {
+  technical_score: number;
+  fundamental_score: number | null;
+  overall_score: number | null;
+  technical_weight: number;
+  fundamental_weight: number;
+  fundamental_factors: FundamentalScoreFactor[];
+  methodology: string;
+}
+
 export interface SignalResponse {
   ticker: string;
+  model_version: string;
   signal: SignalLabel;
   score: number;
+  score_breakdown: Record<string, number>;
   confidence: Confidence;
   positive_factors: ScoreFactor[];
   negative_factors: ScoreFactor[];
@@ -119,6 +158,10 @@ export interface SignalResponse {
   trend_classification: string;
   volatility_regime: string;
   risk: Risk;
+  signal_change: SignalChange | null;
+  stability: SignalStability;
+  invalidation_conditions: string[];
+  overall_score: OverallScore | null;
   signal_timeframe: string;
   signal_generated_at: string;
   latest_candle_date: string;
@@ -183,7 +226,229 @@ export interface BacktestResponse {
   drawdown_curve: EquityPoint[];
   warnings: string[];
   methodology: Record<string, string>;
+  model_version: string;
   meta: DataMeta;
+}
+
+export interface WalkForwardFold {
+  fold_index: number;
+  train_start: string;
+  train_end: string;
+  test_start: string;
+  test_end: string;
+  test_total_return_percent: number | null;
+  test_buy_hold_return_percent: number | null;
+  test_max_drawdown_percent: number | null;
+  test_sharpe_ratio: number | null;
+  test_number_of_trades: number;
+  test_win_rate_percent: number | null;
+}
+
+export interface WalkForwardResponse {
+  ticker: string;
+  train_years: number;
+  test_years: number;
+  folds: WalkForwardFold[];
+  folds_with_positive_return: number;
+  average_test_return_percent: number | null;
+  methodology: string;
+  meta: DataMeta;
+}
+
+export interface WalkForwardRequestPayload {
+  ticker: string;
+  train_years: number;
+  test_years: number;
+  max_folds: number;
+  initial_capital: number;
+  transaction_cost_bps: number;
+  slippage_bps: number;
+}
+
+export interface MonteCarloResponse {
+  ticker: string;
+  simulations: number;
+  resampling_basis: "trade_returns" | "daily_returns" | "unavailable";
+  sample_size: number;
+  median_return_percent: number | null;
+  percentile_5_return_percent: number | null;
+  percentile_95_return_percent: number | null;
+  median_max_drawdown_percent: number | null;
+  worst_max_drawdown_percent: number | null;
+  methodology: string;
+  meta: DataMeta;
+}
+
+export interface MonteCarloRequestPayload {
+  ticker: string;
+  start_date: string;
+  end_date: string;
+  initial_capital: number;
+  transaction_cost_bps: number;
+  slippage_bps: number;
+  simulations: number;
+  seed?: number | null;
+}
+
+export interface SignalHistoryPoint {
+  date: string;
+  signal: SignalLabel;
+  score: number;
+  model_version: string;
+}
+
+export interface SignalHistoryResponse {
+  ticker: string;
+  model_version: string;
+  lookback_sessions: number;
+  history: SignalHistoryPoint[];
+  meta: DataMeta;
+}
+
+export interface SignalPerformanceHorizon {
+  horizon_sessions: number;
+  sample_size: number;
+  positive_rate_percent: number | null;
+  average_return_percent: number | null;
+  median_return_percent: number | null;
+}
+
+export interface SignalPerformanceGroup {
+  signal_group: string;
+  total_signals: number;
+  horizons: SignalPerformanceHorizon[];
+}
+
+export interface SignalPerformanceResponse {
+  ticker: string;
+  model_version: string;
+  lookback_sessions: number;
+  groups: SignalPerformanceGroup[];
+  disclaimer: string;
+  meta: DataMeta;
+}
+
+export interface FundamentalMetric {
+  key: string;
+  label: string;
+  value: number | null;
+  unit: string;
+}
+
+export interface FundamentalsResponse {
+  ticker: string;
+  valuation: FundamentalMetric[];
+  growth: FundamentalMetric[];
+  profitability: FundamentalMetric[];
+  balance_sheet: FundamentalMetric[];
+  has_any_data: boolean;
+  meta: DataMeta;
+}
+
+export interface MarketRegimeResponse {
+  benchmark: string;
+  regime: "BULL" | "BEAR" | "SIDEWAYS" | "HIGH_VOLATILITY" | "UNAVAILABLE";
+  trend_classification: string;
+  momentum: "Positive" | "Negative" | "Neutral";
+  volatility_regime: string;
+  regime_confidence_percent: number;
+  methodology: string;
+  meta: DataMeta;
+}
+
+export interface RelativeStrengthPeriod {
+  period: string;
+  ticker_return_percent: number | null;
+  benchmark_return_percent: number | null;
+  relative_return_pp: number | null;
+  classification: "STRONG" | "IN_LINE" | "WEAK" | "UNAVAILABLE";
+}
+
+export interface RelativeStrengthResponse {
+  ticker: string;
+  benchmark: string;
+  periods: RelativeStrengthPeriod[];
+  meta: DataMeta;
+}
+
+export interface SectorPeerReturn {
+  symbol: string;
+  return_percent: number | null;
+}
+
+export interface SectorComparisonResponse {
+  ticker: string;
+  sector: string | null;
+  period: string;
+  peers: SectorPeerReturn[];
+  available: boolean;
+  meta: DataMeta;
+}
+
+export interface ModelInfoResponse {
+  current_version: string;
+  supported_versions: string[];
+  version_notes: Record<string, string>;
+  factor_weights: { category: string; factor: string; min: number; max: number }[];
+  score_thresholds: Record<string, number>;
+  confidence_methodology: string;
+  risk_methodology: string;
+  backtest_methodology: Record<string, string>;
+  no_look_ahead_methodology: string;
+  data_limitations: string[];
+  disclaimer: string;
+}
+
+export interface ModelPerformanceResponse {
+  ticker: string;
+  model_version: string;
+  lookback_sessions: number;
+  signal_counts: Record<string, number>;
+  stability: SignalStability;
+  performance: SignalPerformanceGroup[];
+  backtest_summary: Record<string, number | string | null>;
+  meta: DataMeta;
+}
+
+export interface PaperPosition {
+  ticker: string;
+  shares: number;
+  avg_entry_price: number;
+  current_price: number | null;
+  market_value: number | null;
+  unrealized_pnl: number | null;
+  unrealized_pnl_percent: number | null;
+}
+
+export interface PaperTrade {
+  date: string;
+  ticker: string;
+  action: "BUY" | "SELL";
+  shares: number;
+  price: number;
+  realized_pnl: number | null;
+}
+
+export interface PaperPortfolioResponse {
+  portfolio_id: string;
+  simulation_only: boolean;
+  starting_capital: number;
+  cash: number;
+  invested_capital: number;
+  current_value: number;
+  total_return_percent: number;
+  realized_pnl: number;
+  unrealized_pnl: number;
+  positions: PaperPosition[];
+  trades: PaperTrade[];
+  disclaimer: string;
+}
+
+export interface PaperTradeRequestPayload {
+  portfolio_id: string;
+  ticker: string;
+  action: "BUY" | "SELL";
+  shares: number;
 }
 
 export interface SearchResultItem {

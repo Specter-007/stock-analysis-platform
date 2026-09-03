@@ -4,8 +4,17 @@ from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Query
 
-from app.config import MOVERS_WATCHLIST
-from app.models.schemas import IndexQuote, MarketOverviewResponse, MoverQuote, SearchResponse, SearchResultItem
+from app.config import MARKET_REGIME_BENCHMARK, MOVERS_WATCHLIST
+from app.indicators.compute import compute_indicator_frame
+from app.market.regime import classify_market_regime
+from app.models.schemas import (
+    IndexQuote,
+    MarketOverviewResponse,
+    MarketRegimeResponse,
+    MoverQuote,
+    SearchResponse,
+    SearchResultItem,
+)
 from app.services import market_data
 
 router = APIRouter(prefix="/api", tags=["market"])
@@ -28,6 +37,27 @@ def get_market_status():
         gainers=[MoverQuote(**g) for g in gainers],
         losers=[MoverQuote(**l) for l in losers],
         meta=index_meta.to_dict(),
+    )
+
+
+@router.get("/market/regime", response_model=MarketRegimeResponse)
+def get_market_regime(benchmark: str = Query(default=MARKET_REGIME_BENCHMARK)):
+    from app.utils.validation import normalize_and_validate_ticker
+
+    benchmark = normalize_and_validate_ticker(benchmark)
+    full_df, meta = market_data.get_full_daily_history(benchmark)
+    indicator_df = compute_indicator_frame(full_df)
+    result = classify_market_regime(benchmark, indicator_df)
+
+    return MarketRegimeResponse(
+        benchmark=result.benchmark,
+        regime=result.regime,
+        trend_classification=result.trend_classification,
+        momentum=result.momentum,
+        volatility_regime=result.volatility_regime,
+        regime_confidence_percent=result.regime_confidence_percent,
+        methodology=result.methodology,
+        meta=meta.to_dict(),
     )
 
 

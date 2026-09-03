@@ -1,4 +1,4 @@
-import { TrendingUp, TrendingDown, Minus, Clock, CalendarClock } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, Clock, CalendarClock, ArrowRight } from "lucide-react";
 import { clsx } from "clsx";
 import type { SignalResponse } from "@/types/api";
 import { SIGNAL_LABELS } from "@/lib/constants";
@@ -32,7 +32,7 @@ export function SignalCard({ signal }: { signal: SignalResponse }) {
             <p className={clsx("text-xl font-semibold leading-none", style.text)}>
               {SIGNAL_LABELS[signal.signal] ?? signal.signal}
             </p>
-            <p className="text-xs text-text-muted mt-1">Model classification</p>
+            <p className="text-xs text-text-muted mt-1">Model classification &middot; v{signal.model_version}</p>
           </div>
         </div>
 
@@ -43,6 +43,27 @@ export function SignalCard({ signal }: { signal: SignalResponse }) {
           <Metric label="Volatility Regime" value={signal.volatility_regime} />
         </div>
       </div>
+
+      {signal.signal_change && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-accent/30 bg-accent-dim px-4 py-3">
+          <span className="text-xs font-semibold text-accent uppercase tracking-wide">Signal changed</span>
+          <span className="flex items-center gap-2 text-sm font-medium text-text-primary">
+            {SIGNAL_LABELS[signal.signal_change.previous_signal]}
+            <ArrowRight size={14} className="text-text-muted" aria-hidden="true" />
+            {SIGNAL_LABELS[signal.signal_change.current_signal]}
+          </span>
+          <span className="text-xs text-text-muted tabular">
+            ({signal.signal_change.previous_score.toFixed(0)} &rarr; {signal.signal_change.current_score.toFixed(0)})
+          </span>
+          {signal.signal_change.contributing_changes.length > 0 && (
+            <ul className="w-full mt-1 flex flex-col gap-0.5 text-xs text-text-secondary">
+              {signal.signal_change.contributing_changes.map((c, i) => (
+                <li key={i}>&bull; {c}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-text-muted border-t border-border pt-4">
         <span className="flex items-center gap-1.5">
