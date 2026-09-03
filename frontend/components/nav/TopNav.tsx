@@ -13,6 +13,7 @@ const NAV_LINKS = [
   { href: "/analysis", label: "Analysis" },
   { href: "/watchlist", label: "Watchlist" },
   { href: "/backtest", label: "Backtesting" },
+  { href: "/portfolio", label: "Portfolio" },
   { href: "/paper-trading", label: "Paper Trading" },
   { href: "/model", label: "Model" },
 ];

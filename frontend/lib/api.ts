@@ -12,6 +12,8 @@ import type {
   MonteCarloResponse,
   PaperEquityHistoryResponse,
   PaperPortfolioResponse,
+  PortfolioBacktestRequestPayload,
+  PortfolioBacktestResponse,
   SensitivityHeatmapRequestPayload,
   SensitivityHeatmapResponse,
   SensitivityRequestPayload,
@@ -160,6 +162,14 @@ export function runSensitivity(payload: SensitivityRequestPayload, signal?: Abor
 
 export function runSensitivityHeatmap(payload: SensitivityHeatmapRequestPayload, signal?: AbortSignal) {
   return apiFetch<SensitivityHeatmapResponse>(`/api/backtest/sensitivity/heatmap`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export function runPortfolioBacktest(payload: PortfolioBacktestRequestPayload, signal?: AbortSignal) {
+  return apiFetch<PortfolioBacktestResponse>(`/api/backtest/portfolio`, {
     method: "POST",
     body: JSON.stringify(payload),
     signal,

@@ -410,6 +410,77 @@ export interface ForwardValidationResponse {
   methodology: string;
 }
 
+export type AllocationMethod = "EQUAL_WEIGHT" | "FIXED_WEIGHT" | "SIGNAL_WEIGHTED" | "RISK_WEIGHTED";
+export type RebalanceFrequency = "DAILY" | "WEEKLY" | "MONTHLY";
+
+export interface PortfolioConstraintsPayload {
+  max_position_weight_percent?: number;
+  min_position_weight_percent?: number;
+  max_holdings?: number | null;
+  cash_allocation_percent?: number;
+  sector_cap_percent?: number | null;
+}
+
+export interface PortfolioBacktestRequestPayload {
+  tickers: string[];
+  start_date: string;
+  end_date: string;
+  initial_capital: number;
+  transaction_cost_bps: number;
+  slippage_bps: number;
+  allocation_method: AllocationMethod;
+  rebalance_frequency: RebalanceFrequency;
+  constraints?: PortfolioConstraintsPayload;
+  fixed_weights?: Record<string, number> | null;
+  benchmark_ticker?: string | null;
+}
+
+export interface PortfolioHoldingSnapshot {
+  date: string;
+  ticker: string;
+  weight_percent: number;
+  shares: number;
+  price: number;
+  market_value: number;
+}
+
+export interface PortfolioBacktestResponse {
+  tickers: string[];
+  start_date: string;
+  end_date: string;
+  initial_capital: number;
+  final_capital: number;
+  allocation_method: AllocationMethod;
+  rebalance_frequency: RebalanceFrequency;
+  total_return_percent: number | null;
+  equal_weight_buy_hold_return_percent: number | null;
+  benchmark_ticker: string | null;
+  benchmark_return_percent: number | null;
+  max_drawdown_percent: number | null;
+  sharpe_ratio: number | null;
+  trading_days: number;
+  number_of_rebalances: number;
+  equity_curve: EquityPoint[];
+  equal_weight_buy_hold_curve: EquityPoint[];
+  benchmark_curve: EquityPoint[];
+  drawdown_curve: EquityPoint[];
+  holdings_history: PortfolioHoldingSnapshot[];
+  advanced_metrics: Record<string, number | null>;
+  risk_analytics: {
+    exposure_percent: number;
+    cash_percent: number;
+    largest_position_percent: number;
+    top_3_concentration_percent: number;
+    sector_concentration_percent: Record<string, number>;
+    correlation_matrix: Record<string, Record<string, number | null>> | null;
+    number_of_holdings: number;
+  };
+  warnings: string[];
+  excluded_tickers: Record<string, string>;
+  methodology: Record<string, string>;
+  meta: DataMeta;
+}
+
 export interface MonteCarloResponse {
   ticker: string;
   simulations: number;

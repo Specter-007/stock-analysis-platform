@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 
 from app.backtesting.engine import BacktestResult, run_backtest
 from app.backtesting.monte_carlo import run_monte_carlo
 from app.backtesting.out_of_sample import run_out_of_sample_validation
+from app.backtesting.portfolio import (
+    ALLOCATION_METHODS,
+    REBALANCE_FREQUENCIES,
+    PortfolioConstraints,
+    run_portfolio_backtest,
+)
 from app.backtesting.sensitivity import (
     ALL_PARAMETERS,
     THRESHOLD_PARAMETERS,
@@ -21,6 +29,10 @@ from app.models.schemas import (
     OutOfSampleRequest,
     OutOfSampleResponse,
     PeriodResultModel,
+    PortfolioBacktestRequest,
+    PortfolioBacktestResponse,
+    PortfolioEquityPointModel,
+    PortfolioHoldingSnapshotModel,
     SensitivityHeatmapCellModel,
     SensitivityHeatmapRequest,
     SensitivityHeatmapResponse,
@@ -313,5 +325,76 @@ def post_out_of_sample(request: OutOfSampleRequest):
         ticker=result.ticker,
         model_version=result.model_version,
         periods=[PeriodResultModel(**p.__dict__) for p in result.periods],
+        meta=meta.to_dict(),
+    )
+
+
+@router.post("/backtest/portfolio", response_model=PortfolioBacktestResponse)
+def post_portfolio_backtest(request: PortfolioBacktestRequest):
+    tickers = [normalize_and_validate_ticker(t) for t in request.tickers]
+    if len(set(tickers)) != len(tickers):
+        raise HTTPException(status_code=422, detail="Duplicate tickers are not allowed.")
+    if request.allocation_method not in ALLOCATION_METHODS:
+        raise HTTPException(status_code=422, detail=f"allocation_method must be one of: {', '.join(ALLOCATION_METHODS)}")
+    if request.rebalance_frequency not in REBALANCE_FREQUENCIES:
+        raise HTTPException(status_code=422, detail=f"rebalance_frequency must be one of: {', '.join(REBALANCE_FREQUENCIES)}")
+
+    with ThreadPoolExecutor(max_workers=min(8, len(tickers))) as pool:
+        fetch_results = list(pool.map(market_data.get_full_daily_history, tickers))
+    price_data = {t: df for t, (df, _meta) in zip(tickers, fetch_results)}
+    meta = fetch_results[0][1]
+
+    benchmark_df = None
+    if request.benchmark_ticker:
+        try:
+            benchmark_df, _ = market_data.get_full_daily_history(request.benchmark_ticker)
+        except Exception:
+            benchmark_df = None
+
+    constraints = PortfolioConstraints(**request.constraints.model_dump())
+
+    result = run_portfolio_backtest(
+        tickers=tickers,
+        price_data=price_data,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        initial_capital=request.initial_capital,
+        transaction_cost_bps=request.transaction_cost_bps,
+        slippage_bps=request.slippage_bps,
+        allocation_method=request.allocation_method,
+        rebalance_frequency=request.rebalance_frequency,
+        constraints=constraints,
+        fixed_weights=request.fixed_weights,
+        model_version=request.model_version,
+        benchmark_ticker=request.benchmark_ticker,
+        benchmark_price_df=benchmark_df,
+    )
+
+    return PortfolioBacktestResponse(
+        tickers=result.tickers,
+        start_date=result.start_date,
+        end_date=result.end_date,
+        initial_capital=result.initial_capital,
+        final_capital=result.final_capital,
+        allocation_method=result.allocation_method,
+        rebalance_frequency=result.rebalance_frequency,
+        total_return_percent=result.total_return_percent,
+        equal_weight_buy_hold_return_percent=result.equal_weight_buy_hold_return_percent,
+        benchmark_ticker=result.benchmark_ticker,
+        benchmark_return_percent=result.benchmark_return_percent,
+        max_drawdown_percent=result.max_drawdown_percent,
+        sharpe_ratio=result.sharpe_ratio,
+        trading_days=result.trading_days,
+        number_of_rebalances=result.number_of_rebalances,
+        equity_curve=[PortfolioEquityPointModel(**p.__dict__) for p in result.equity_curve],
+        equal_weight_buy_hold_curve=[PortfolioEquityPointModel(**p.__dict__) for p in result.equal_weight_buy_hold_curve],
+        benchmark_curve=[PortfolioEquityPointModel(**p.__dict__) for p in result.benchmark_curve],
+        drawdown_curve=[PortfolioEquityPointModel(**p.__dict__) for p in result.drawdown_curve],
+        holdings_history=[PortfolioHoldingSnapshotModel(**h.__dict__) for h in result.holdings_history],
+        advanced_metrics=result.advanced_metrics,
+        risk_analytics=result.risk_analytics,
+        warnings=result.warnings,
+        excluded_tickers=result.excluded_tickers,
+        methodology=result.methodology,
         meta=meta.to_dict(),
     )

@@ -451,6 +451,89 @@ class MonteCarloResponse(BaseModel):
     meta: DataMeta
 
 
+# ----------------------------------------------------- Portfolio Backtest
+
+class PortfolioConstraintsModel(BaseModel):
+    max_position_weight_percent: float = Field(default=100.0, gt=0, le=100)
+    min_position_weight_percent: float = Field(default=0.0, ge=0, le=100)
+    max_holdings: int | None = Field(default=None, gt=0)
+    cash_allocation_percent: float = Field(default=0.0, ge=0, lt=100)
+    sector_cap_percent: float | None = Field(default=None, gt=0, le=100)
+
+
+class PortfolioBacktestRequest(BaseModel):
+    tickers: list[str] = Field(min_length=2, max_length=20)
+    start_date: dt.date
+    end_date: dt.date
+    initial_capital: float = Field(default=DEFAULT_INITIAL_CAPITAL, gt=0)
+    transaction_cost_bps: float = Field(default=DEFAULT_TRANSACTION_COST_BPS, ge=0, le=1000)
+    slippage_bps: float = Field(default=DEFAULT_SLIPPAGE_BPS, ge=0, le=1000)
+    allocation_method: str = Field(default="EQUAL_WEIGHT")
+    rebalance_frequency: str = Field(default="MONTHLY")
+    constraints: PortfolioConstraintsModel = Field(default_factory=PortfolioConstraintsModel)
+    fixed_weights: dict[str, float] | None = None
+    model_version: str = Field(default=MODEL_VERSION_CURRENT)
+    benchmark_ticker: str | None = Field(default=DEFAULT_BENCHMARK_TICKER)
+
+    @field_validator("model_version")
+    @classmethod
+    def valid_model_version_portfolio(cls, v: str) -> str:
+        if v not in SUPPORTED_MODEL_VERSIONS:
+            return MODEL_VERSION_CURRENT
+        return v
+
+    @field_validator("end_date")
+    @classmethod
+    def end_after_start_portfolio(cls, v: dt.date, info):
+        start = info.data.get("start_date")
+        if start is not None and v <= start:
+            raise ValueError("end_date must be after start_date.")
+        return v
+
+
+class PortfolioEquityPointModel(BaseModel):
+    date: str
+    equity: float
+
+
+class PortfolioHoldingSnapshotModel(BaseModel):
+    date: str
+    ticker: str
+    weight_percent: float
+    shares: float
+    price: float
+    market_value: float
+
+
+class PortfolioBacktestResponse(BaseModel):
+    tickers: list[str]
+    start_date: str
+    end_date: str
+    initial_capital: float
+    final_capital: float
+    allocation_method: str
+    rebalance_frequency: str
+    total_return_percent: float | None
+    equal_weight_buy_hold_return_percent: float | None
+    benchmark_ticker: str | None
+    benchmark_return_percent: float | None
+    max_drawdown_percent: float | None
+    sharpe_ratio: float | None
+    trading_days: int
+    number_of_rebalances: int
+    equity_curve: list[PortfolioEquityPointModel]
+    equal_weight_buy_hold_curve: list[PortfolioEquityPointModel]
+    benchmark_curve: list[PortfolioEquityPointModel]
+    drawdown_curve: list[PortfolioEquityPointModel]
+    holdings_history: list[PortfolioHoldingSnapshotModel]
+    advanced_metrics: dict
+    risk_analytics: dict
+    warnings: list[str]
+    excluded_tickers: dict[str, str]
+    methodology: dict[str, str]
+    meta: DataMeta
+
+
 # -------------------------------------------------------- Sensitivity
 
 class SensitivityRequest(BaseModel):
