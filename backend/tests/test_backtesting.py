@@ -168,3 +168,29 @@ def test_total_return_and_annualized_return():
     assert m.total_return(0, 150) is None
     ann = m.annualized_return(100, 200, 252)
     assert ann == pytest.approx(100.0, rel=1e-2)
+
+
+def test_beta_alpha_present_with_tz_aware_equity_index(ohlcv_long, ohlcv_uptrend):
+    """Regression test: real yfinance data has a timezone-AWARE index, while
+    the benchmark equity curve's date strings are naive "YYYY-MM-DD". A
+    previous version reindexed one against the other directly, which
+    silently matched nothing and left beta/alpha/tracking-error/information-
+    ratio None even with a perfectly valid benchmark supplied.
+    """
+    tz_aware_ticker = ohlcv_long.tz_localize("America/New_York")
+    tz_aware_benchmark = ohlcv_uptrend.tz_localize("America/New_York")
+
+    start, end = _date_range(tz_aware_ticker)
+    result = run_backtest(
+        ticker="TEST",
+        full_price_df=tz_aware_ticker,
+        start_date=start,
+        end_date=end,
+        initial_capital=10_000.0,
+        transaction_cost_bps=5,
+        slippage_bps=5,
+        benchmark_ticker="BENCH",
+        benchmark_full_price_df=tz_aware_benchmark,
+    )
+    assert result.advanced_metrics["beta"] is not None
+    assert result.advanced_metrics["tracking_error_percent"] is not None

@@ -313,19 +313,40 @@ def _volatility_factor(indicator_df: pd.DataFrame, regime: str) -> ScoreFactor |
     )
 
 
-def score_to_signal(score: float) -> str:
-    if score >= SCORE_STRONG_BUY:
+@dataclass
+class ScoreThresholds:
+    """Defaults to the standard, versioned thresholds from config. A caller
+    (currently only parameter-sensitivity analysis) may override these to
+    test a perturbed model - any such run must be labeled a CUSTOM model in
+    the API/UI, never presented as a standard versioned result.
+    """
+
+    strong_buy: float = SCORE_STRONG_BUY
+    buy: float = SCORE_BUY
+    hold_low: float = SCORE_HOLD_LOW
+    sell_low: float = SCORE_SELL_LOW
+
+
+DEFAULT_THRESHOLDS = ScoreThresholds()
+
+
+def score_to_signal(score: float, thresholds: ScoreThresholds = DEFAULT_THRESHOLDS) -> str:
+    if score >= thresholds.strong_buy:
         return "STRONG_BUY"
-    if score >= SCORE_BUY:
+    if score >= thresholds.buy:
         return "BUY"
-    if score >= SCORE_HOLD_LOW:
+    if score >= thresholds.hold_low:
         return "HOLD"
-    if score >= SCORE_SELL_LOW:
+    if score >= thresholds.sell_low:
         return "SELL"
     return "STRONG_SELL"
 
 
-def evaluate(indicator_df: pd.DataFrame, model_version: str = MODEL_VERSION_CURRENT) -> SignalResult:
+def evaluate(
+    indicator_df: pd.DataFrame,
+    model_version: str = MODEL_VERSION_CURRENT,
+    thresholds: ScoreThresholds = DEFAULT_THRESHOLDS,
+) -> SignalResult:
     """Evaluate the deterministic signal at the LAST row of `indicator_df`.
 
     `indicator_df` must already contain the columns produced by
@@ -378,7 +399,7 @@ def evaluate(indicator_df: pd.DataFrame, model_version: str = MODEL_VERSION_CURR
         normalized = max(0.0, min(100.0, normalized))
 
     return SignalResult(
-        signal=score_to_signal(normalized),
+        signal=score_to_signal(normalized, thresholds),
         score=round(normalized, 1),
         raw_score=raw_score,
         raw_min=raw_min,

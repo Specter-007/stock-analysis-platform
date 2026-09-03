@@ -5,12 +5,21 @@ from fastapi import APIRouter
 
 from app.backtesting.engine import BacktestResult, run_backtest
 from app.backtesting.monte_carlo import run_monte_carlo
+from app.backtesting.out_of_sample import run_out_of_sample_validation
+from app.backtesting.sensitivity import run_sensitivity_analysis
 from app.backtesting.walk_forward import run_walk_forward
 from app.models.schemas import (
     BacktestRequest,
     BacktestResponse,
     MonteCarloRequest,
     MonteCarloResponse,
+    OutOfSampleRequest,
+    OutOfSampleResponse,
+    PeriodResultModel,
+    SensitivityPointModel,
+    SensitivityRequest,
+    SensitivityResponse,
+    SensitivityResultModel,
     WalkForwardFoldModel,
     WalkForwardRequest,
     WalkForwardResponse,
@@ -90,6 +99,7 @@ def _to_backtest_response(result: BacktestResult, meta_dict: dict) -> BacktestRe
         warnings=result.warnings,
         methodology=BACKTEST_METHODOLOGY,
         model_version=result.model_version,
+        advanced_metrics=result.advanced_metrics,
         meta=meta_dict,
     )
 
@@ -183,5 +193,70 @@ def post_monte_carlo(request: MonteCarloRequest):
         median_max_drawdown_percent=mc_result.median_max_drawdown_percent,
         worst_max_drawdown_percent=mc_result.worst_max_drawdown_percent,
         methodology=mc_result.methodology,
+        meta=meta.to_dict(),
+    )
+
+
+@router.post("/backtest/sensitivity", response_model=SensitivityResponse)
+def post_sensitivity(request: SensitivityRequest):
+    ticker = normalize_and_validate_ticker(request.ticker)
+    full_df, meta = market_data.get_full_daily_history(ticker)
+
+    result = run_sensitivity_analysis(
+        ticker=ticker,
+        full_price_df=full_df,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        initial_capital=request.initial_capital,
+        transaction_cost_bps=request.transaction_cost_bps,
+        slippage_bps=request.slippage_bps,
+        model_version=request.model_version,
+    )
+
+    return SensitivityResponse(
+        ticker=result.ticker,
+        model_version=result.model_version,
+        parameters=[
+            SensitivityResultModel(
+                parameter=p.parameter,
+                default_value=p.default_value,
+                points=[SensitivityPointModel(**pt.__dict__) for pt in p.points],
+                robustness=p.robustness,
+                robust_region_min=p.robust_region_min,
+                robust_region_max=p.robust_region_max,
+                note=p.note,
+            )
+            for p in result.parameters
+        ],
+        methodology=result.methodology,
+        meta=meta.to_dict(),
+    )
+
+
+@router.post("/backtest/out-of-sample", response_model=OutOfSampleResponse)
+def post_out_of_sample(request: OutOfSampleRequest):
+    ticker = normalize_and_validate_ticker(request.ticker)
+    full_df, meta = market_data.get_full_daily_history(ticker)
+
+    windows = [
+        ("IN_SAMPLE", request.in_sample_start, request.in_sample_end),
+        ("VALIDATION", request.validation_start, request.validation_end),
+        ("OUT_OF_SAMPLE", request.out_of_sample_start, request.out_of_sample_end),
+    ]
+
+    result = run_out_of_sample_validation(
+        ticker=ticker,
+        full_price_df=full_df,
+        windows=windows,
+        initial_capital=request.initial_capital,
+        transaction_cost_bps=request.transaction_cost_bps,
+        slippage_bps=request.slippage_bps,
+        model_version=request.model_version,
+    )
+
+    return OutOfSampleResponse(
+        ticker=result.ticker,
+        model_version=result.model_version,
+        periods=[PeriodResultModel(**p.__dict__) for p in result.periods],
         meta=meta.to_dict(),
     )

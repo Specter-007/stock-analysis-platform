@@ -10,7 +10,9 @@ import type {
   MonteCarloRequestPayload,
   MonteCarloResponse,
   PaperPortfolioResponse,
+  PaperRiskResponse,
   PaperTradeRequestPayload,
+  WatchlistResponse,
   RelativeStrengthResponse,
   SearchResponse,
   SectorComparisonResponse,
@@ -163,6 +165,38 @@ export function resetPaperPortfolio(portfolioId = "default", startingCapital?: n
     method: "POST",
     signal,
   });
+}
+
+export function getPaperRisk(portfolioId = "default", signal?: AbortSignal) {
+  return apiFetch<PaperRiskResponse>(`/api/paper-portfolio/risk?portfolio_id=${encodeURIComponent(portfolioId)}`, {
+    signal,
+  });
+}
+
+export function closeAllPaperPositions(portfolioId = "default", signal?: AbortSignal) {
+  return apiFetch<PaperPortfolioResponse>(
+    `/api/paper-portfolio/close-all?portfolio_id=${encodeURIComponent(portfolioId)}`,
+    { method: "POST", signal }
+  );
+}
+
+export function getWatchlist(watchlistId = "default", signal?: AbortSignal) {
+  return apiFetch<WatchlistResponse>(`/api/watchlist?watchlist_id=${encodeURIComponent(watchlistId)}`, { signal });
+}
+
+export function addToWatchlist(ticker: string, watchlistId = "default", signal?: AbortSignal) {
+  return apiFetch<WatchlistResponse>(`/api/watchlist`, {
+    method: "POST",
+    body: JSON.stringify({ watchlist_id: watchlistId, ticker }),
+    signal,
+  });
+}
+
+export function removeFromWatchlist(ticker: string, watchlistId = "default", signal?: AbortSignal) {
+  return apiFetch<WatchlistResponse>(
+    `/api/watchlist/${encodeURIComponent(ticker)}?watchlist_id=${encodeURIComponent(watchlistId)}`,
+    { method: "DELETE", signal }
+  );
 }
 
 export function searchTickers(query: string, signal?: AbortSignal) {

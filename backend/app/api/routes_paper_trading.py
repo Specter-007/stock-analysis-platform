@@ -3,7 +3,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Query
 
 from app.config import PAPER_TRADING_DEFAULT_PORTFOLIO_ID
-from app.models.schemas import PaperPortfolioResponse, PaperPositionModel, PaperTradeModel, PaperTradeRequest
+from app.models.schemas import (
+    PaperPortfolioResponse,
+    PaperPositionModel,
+    PaperRiskResponse,
+    PaperTradeModel,
+    PaperTradeRequest,
+)
+from app.paper_trading import risk as paper_risk
 from app.paper_trading import service as paper_trading_service
 
 router = APIRouter(prefix="/api", tags=["paper-trading"])
@@ -19,22 +26,12 @@ def _to_response(view) -> PaperPortfolioResponse:
         total_return_percent=view.total_return_percent,
         realized_pnl=view.realized_pnl,
         unrealized_pnl=view.unrealized_pnl,
-        positions=[
-            PaperPositionModel(
-                ticker=p.ticker,
-                shares=p.shares,
-                avg_entry_price=p.avg_entry_price,
-                current_price=p.current_price,
-                market_value=p.market_value,
-                unrealized_pnl=p.unrealized_pnl,
-                unrealized_pnl_percent=p.unrealized_pnl_percent,
-            )
-            for p in view.positions
-        ],
-        trades=[
-            PaperTradeModel(date=t.date, ticker=t.ticker, action=t.action, shares=t.shares, price=t.price, realized_pnl=t.realized_pnl)
-            for t in view.trades
-        ],
+        number_of_positions=view.number_of_positions,
+        exposure_percent=view.exposure_percent,
+        largest_position_percent=view.largest_position_percent,
+        cash_percent=view.cash_percent,
+        positions=[PaperPositionModel(**p.__dict__) for p in view.positions],
+        trades=[PaperTradeModel(**t.__dict__) for t in view.trades],
     )
 
 
@@ -47,7 +44,17 @@ def get_paper_portfolio(portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_
 @router.post("/paper-trade", response_model=PaperPortfolioResponse)
 def post_paper_trade(request: PaperTradeRequest):
     view = paper_trading_service.execute_trade(
-        request.portfolio_id, request.ticker, request.action, request.shares
+        portfolio_id=request.portfolio_id,
+        ticker=request.ticker,
+        action=request.action,
+        shares=request.shares,
+        sizing_mode=request.sizing_mode,
+        capital_percent=request.capital_percent,
+        risk_percent=request.risk_percent,
+        stop_loss_percent=request.stop_loss_percent,
+        take_profit_percent=request.take_profit_percent,
+        trailing_stop_percent=request.trailing_stop_percent,
+        max_position_percent=request.max_position_percent,
     )
     return _to_response(view)
 
@@ -55,10 +62,7 @@ def post_paper_trade(request: PaperTradeRequest):
 @router.get("/paper-trades", response_model=list[PaperTradeModel])
 def get_paper_trades(portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID)):
     view = paper_trading_service.get_portfolio(portfolio_id)
-    return [
-        PaperTradeModel(date=t.date, ticker=t.ticker, action=t.action, shares=t.shares, price=t.price, realized_pnl=t.realized_pnl)
-        for t in view.trades
-    ]
+    return [PaperTradeModel(**t.__dict__) for t in view.trades]
 
 
 @router.post("/paper-portfolio/reset", response_model=PaperPortfolioResponse)
@@ -68,3 +72,16 @@ def reset_paper_portfolio(
 ):
     view = paper_trading_service.reset(portfolio_id, starting_capital)
     return _to_response(view)
+
+
+@router.post("/paper-portfolio/close-all", response_model=PaperPortfolioResponse)
+def close_all_paper_positions(portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID)):
+    view = paper_trading_service.close_all_positions(portfolio_id, exit_reason="END_OF_TEST")
+    return _to_response(view)
+
+
+@router.get("/paper-portfolio/risk", response_model=PaperRiskResponse)
+def get_paper_portfolio_risk(portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID)):
+    view = paper_trading_service.get_portfolio(portfolio_id)
+    result = paper_risk.assess_portfolio_risk(view)
+    return PaperRiskResponse(**result.__dict__)

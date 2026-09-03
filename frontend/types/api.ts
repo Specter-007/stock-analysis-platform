@@ -227,6 +227,27 @@ export interface BacktestResponse {
   warnings: string[];
   methodology: Record<string, string>;
   model_version: string;
+  advanced_metrics: {
+    cagr_percent: number | null;
+    annualized_volatility_percent: number | null;
+    sortino_ratio: number | null;
+    calmar_ratio: number | null;
+    average_drawdown_percent: number | null;
+    downside_deviation_percent: number | null;
+    max_drawdown_recovery_days: number | null;
+    expectancy: number | null;
+    exposure_percent: number | null;
+    turnover_percent: number | null;
+    beta: number | null;
+    alpha_percent: number | null;
+    tracking_error_percent: number | null;
+    information_ratio: number | null;
+    average_win: number | null;
+    average_loss: number | null;
+    average_win_percent: number | null;
+    average_loss_percent: number | null;
+    median_trade_percent: number | null;
+  };
   meta: DataMeta;
 }
 
@@ -410,6 +431,14 @@ export interface ModelPerformanceResponse {
   meta: DataMeta;
 }
 
+export type PaperExitReason =
+  | "MODEL_SELL"
+  | "STOP_LOSS"
+  | "TAKE_PROFIT"
+  | "TRAILING_STOP"
+  | "END_OF_TEST"
+  | "MANUAL_PAPER_EXIT";
+
 export interface PaperPosition {
   ticker: string;
   shares: number;
@@ -418,6 +447,12 @@ export interface PaperPosition {
   market_value: number | null;
   unrealized_pnl: number | null;
   unrealized_pnl_percent: number | null;
+  stop_loss_percent: number | null;
+  take_profit_percent: number | null;
+  trailing_stop_percent: number | null;
+  entry_signal: string | null;
+  entry_score: number | null;
+  entry_date: string | null;
 }
 
 export interface PaperTrade {
@@ -427,6 +462,17 @@ export interface PaperTrade {
   shares: number;
   price: number;
   realized_pnl: number | null;
+  gross_pnl: number | null;
+  fees: number | null;
+  slippage: number | null;
+  net_pnl: number | null;
+  exit_reason: PaperExitReason | null;
+  entry_signal: string | null;
+  entry_score: number | null;
+  exit_signal: string | null;
+  exit_score: number | null;
+  model_version: string | null;
+  market_regime: string | null;
 }
 
 export interface PaperPortfolioResponse {
@@ -439,16 +485,59 @@ export interface PaperPortfolioResponse {
   total_return_percent: number;
   realized_pnl: number;
   unrealized_pnl: number;
+  number_of_positions: number;
+  exposure_percent: number;
+  largest_position_percent: number;
+  cash_percent: number;
   positions: PaperPosition[];
   trades: PaperTrade[];
   disclaimer: string;
 }
 
+export type PositionSizingMode = "FIXED_SHARES" | "FIXED_CAPITAL_PERCENT" | "RISK_PERCENT";
+
 export interface PaperTradeRequestPayload {
   portfolio_id: string;
   ticker: string;
   action: "BUY" | "SELL";
-  shares: number;
+  shares?: number | null;
+  sizing_mode?: PositionSizingMode | null;
+  capital_percent?: number | null;
+  risk_percent?: number | null;
+  max_position_percent?: number;
+  stop_loss_percent?: number | null;
+  take_profit_percent?: number | null;
+  trailing_stop_percent?: number | null;
+}
+
+export interface PaperRiskResponse {
+  total_exposure_percent: number;
+  cash_percent: number;
+  largest_position_percent: number;
+  number_of_positions: number;
+  sector_concentration: Record<string, number>;
+  warnings: string[];
+  methodology: string;
+}
+
+export interface WatchlistEntry {
+  ticker: string;
+  company_name: string | null;
+  price: number | null;
+  change_percent: number | null;
+  signal: SignalLabel | null;
+  score: number | null;
+  trend_classification: string | null;
+  market_regime: string | null;
+  data_status: string;
+  signal_changed_today: boolean;
+  error: string | null;
+}
+
+export interface WatchlistResponse {
+  watchlist_id: string;
+  tickers: string[];
+  entries: WatchlistEntry[];
 }
 
 export interface SearchResultItem {

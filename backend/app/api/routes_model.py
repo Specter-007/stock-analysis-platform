@@ -16,7 +16,17 @@ from app.config import (
     SUPPORTED_MODEL_VERSIONS,
 )
 from app.indicators.compute import compute_indicator_frame
-from app.models.schemas import ModelInfoResponse, ModelPerformanceResponse, SignalPerformanceGroupModel, SignalPerformanceHorizonModel, SignalStabilityModel
+from app.market.regime_performance import compute_regime_performance
+from app.models.schemas import (
+    ModelInfoResponse,
+    ModelPerformanceResponse,
+    RegimeBucketModel,
+    RegimePerformanceRequest,
+    RegimePerformanceResponse,
+    SignalPerformanceGroupModel,
+    SignalPerformanceHorizonModel,
+    SignalStabilityModel,
+)
 from app.services import market_data
 from app.services.exceptions import InsufficientHistoryError
 from app.signals import history as history_module
@@ -161,5 +171,40 @@ def get_model_performance(
             for g in perf_groups
         ],
         backtest_summary=backtest_summary,
+        meta=meta.to_dict(),
+    )
+
+
+@router.post("/regime-performance", response_model=RegimePerformanceResponse)
+def post_regime_performance(request: RegimePerformanceRequest):
+    ticker = normalize_and_validate_ticker(request.ticker)
+    benchmark = normalize_and_validate_ticker(request.benchmark)
+
+    full_df, meta = market_data.get_full_daily_history(ticker)
+    benchmark_df, _ = market_data.get_full_daily_history(benchmark)
+
+    backtest_result = run_backtest(
+        ticker=ticker,
+        full_price_df=full_df,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        initial_capital=request.initial_capital,
+        transaction_cost_bps=request.transaction_cost_bps,
+        slippage_bps=request.slippage_bps,
+        model_version=request.model_version,
+    )
+
+    result = compute_regime_performance(
+        ticker=ticker,
+        benchmark=benchmark,
+        backtest_result=backtest_result,
+        benchmark_full_price_df=benchmark_df,
+    )
+
+    return RegimePerformanceResponse(
+        ticker=result.ticker,
+        benchmark=result.benchmark,
+        buckets=[RegimeBucketModel(**b.__dict__) for b in result.buckets],
+        methodology=result.methodology,
         meta=meta.to_dict(),
     )

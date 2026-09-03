@@ -10,6 +10,7 @@ from app.api.routes_market import router as market_router
 from app.api.routes_model import router as model_router
 from app.api.routes_paper_trading import router as paper_trading_router
 from app.api.routes_stock import router as stock_router
+from app.api.routes_watchlist import router as watchlist_router
 from app.config import MODEL_VERSION_CURRENT
 from app.utils.logging_config import configure_logging
 
@@ -43,6 +44,7 @@ app.include_router(backtest_router)
 app.include_router(market_router)
 app.include_router(model_router)
 app.include_router(paper_trading_router)
+app.include_router(watchlist_router)
 
 
 @app.get("/api/health", tags=["meta"])

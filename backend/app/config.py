@@ -170,6 +170,17 @@ MONTE_CARLO_METHODOLOGY = (
 PAPER_TRADING_DEFAULT_CAPITAL = 10_000.0
 PAPER_TRADING_DATA_DIR = "data/paper_trading"
 PAPER_TRADING_DEFAULT_PORTFOLIO_ID = "default"
+# Long-only, no leverage: these are the only two cost line items modeled,
+# charged on both the entry and exit leg of every trade, and always reported
+# to the user as separate gross/fees/slippage/net figures - never hidden
+# inside one opaque P&L number.
+PAPER_TRADING_COMMISSION_BPS = 5.0
+PAPER_TRADING_SLIPPAGE_BPS = 5.0
+# A position sizing rule may not commit more than this share of total
+# portfolio equity to a single position, regardless of the sizing mode
+# requested - a hard backstop against fat-finger inputs.
+PAPER_TRADING_MAX_POSITION_PERCENT = 100.0
+PAPER_TRADING_DEFAULT_MAX_POSITION_PERCENT = 20.0
 
 # --- Signal performance analytics ---
 SIGNAL_PERFORMANCE_HORIZONS_SESSIONS = (5, 20)

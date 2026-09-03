@@ -13,6 +13,7 @@ from app.config import (
     DEFAULT_SLIPPAGE_BPS,
     DEFAULT_TRANSACTION_COST_BPS,
     MODEL_VERSION_CURRENT,
+    PAPER_TRADING_DEFAULT_MAX_POSITION_PERCENT,
     SUPPORTED_MODEL_VERSIONS,
 )
 
@@ -24,6 +25,7 @@ class DataMeta(BaseModel):
     latest_market_timestamp: str | None = None
     market_status: str | None = None
     timeframe: str
+    data_quality: dict | None = None
 
 
 # ---------------------------------------------------------------- Overview
@@ -381,6 +383,7 @@ class BacktestResponse(BaseModel):
     warnings: list[str]
     methodology: dict[str, str]
     model_version: str
+    advanced_metrics: dict
     meta: DataMeta
 
 
@@ -448,13 +451,154 @@ class MonteCarloResponse(BaseModel):
     meta: DataMeta
 
 
+# -------------------------------------------------------- Sensitivity
+
+class SensitivityRequest(BaseModel):
+    ticker: str
+    start_date: dt.date
+    end_date: dt.date
+    initial_capital: float = Field(default=DEFAULT_INITIAL_CAPITAL, gt=0)
+    transaction_cost_bps: float = Field(default=DEFAULT_TRANSACTION_COST_BPS, ge=0, le=1000)
+    slippage_bps: float = Field(default=DEFAULT_SLIPPAGE_BPS, ge=0, le=1000)
+    model_version: str = Field(default=MODEL_VERSION_CURRENT)
+
+    @field_validator("model_version")
+    @classmethod
+    def valid_model_version_sens(cls, v: str) -> str:
+        if v not in SUPPORTED_MODEL_VERSIONS:
+            return MODEL_VERSION_CURRENT
+        return v
+
+    @field_validator("end_date")
+    @classmethod
+    def end_after_start_sens(cls, v: dt.date, info):
+        start = info.data.get("start_date")
+        if start is not None and v <= start:
+            raise ValueError("end_date must be after start_date.")
+        return v
+
+
+class SensitivityPointModel(BaseModel):
+    parameter: str
+    value: float
+    is_default: bool
+    total_return_percent: float | None
+    cagr_percent: float | None
+    sharpe_ratio: float | None
+    max_drawdown_percent: float | None
+    number_of_trades: int
+
+
+class SensitivityResultModel(BaseModel):
+    parameter: str
+    default_value: float
+    points: list[SensitivityPointModel]
+    robustness: str
+    robust_region_min: float | None
+    robust_region_max: float | None
+    note: str | None = None
+
+
+class SensitivityResponse(BaseModel):
+    ticker: str
+    model_version: str
+    parameters: list[SensitivityResultModel]
+    methodology: str
+    meta: DataMeta
+
+
+# ------------------------------------------------------- Out-of-sample
+
+class OutOfSampleRequest(BaseModel):
+    ticker: str
+    in_sample_start: dt.date
+    in_sample_end: dt.date
+    validation_start: dt.date
+    validation_end: dt.date
+    out_of_sample_start: dt.date
+    out_of_sample_end: dt.date
+    initial_capital: float = Field(default=DEFAULT_INITIAL_CAPITAL, gt=0)
+    transaction_cost_bps: float = Field(default=DEFAULT_TRANSACTION_COST_BPS, ge=0, le=1000)
+    slippage_bps: float = Field(default=DEFAULT_SLIPPAGE_BPS, ge=0, le=1000)
+    model_version: str = Field(default=MODEL_VERSION_CURRENT)
+
+    @field_validator("model_version")
+    @classmethod
+    def valid_model_version_oos(cls, v: str) -> str:
+        if v not in SUPPORTED_MODEL_VERSIONS:
+            return MODEL_VERSION_CURRENT
+        return v
+
+    @field_validator("out_of_sample_end")
+    @classmethod
+    def periods_are_chronological_and_non_overlapping(cls, v: dt.date, info):
+        data = info.data
+        required = (
+            "in_sample_start", "in_sample_end", "validation_start",
+            "validation_end", "out_of_sample_start",
+        )
+        if not all(k in data for k in required):
+            return v  # an earlier field already failed validation
+        ordering = [
+            data["in_sample_start"], data["in_sample_end"],
+            data["validation_start"], data["validation_end"],
+            data["out_of_sample_start"], v,
+        ]
+        if ordering != sorted(ordering) or len(set(ordering)) != len(ordering):
+            raise ValueError(
+                "Periods must be strictly chronological and non-overlapping: "
+                "in_sample_start < in_sample_end <= validation_start < validation_end "
+                "<= out_of_sample_start < out_of_sample_end."
+            )
+        return v
+
+
+class PeriodResultModel(BaseModel):
+    label: str
+    start_date: str
+    end_date: str
+    trading_days: int
+    total_return_percent: float | None
+    cagr_percent: float | None
+    sharpe_ratio: float | None
+    sortino_ratio: float | None
+    max_drawdown_percent: float | None
+    number_of_trades: int
+    win_rate_percent: float | None
+    buy_hold_return_percent: float | None
+    error: str | None
+
+
+class OutOfSampleResponse(BaseModel):
+    ticker: str
+    model_version: str
+    periods: list[PeriodResultModel]
+    methodology: str = (
+        "All three periods are evaluated with the SAME fixed, non-fitted signal model - "
+        "there is no parameter-training step. The value of this split is procedural: it "
+        "forces an explicit, pre-committed boundary so the out-of-sample period's result "
+        "was not visible while forming an opinion of the strategy."
+    )
+    meta: DataMeta
+
+
 # ----------------------------------------------------------- Paper trading
 
 class PaperTradeRequest(BaseModel):
     portfolio_id: str = Field(default="default", max_length=64)
     ticker: str
     action: str  # "BUY" | "SELL"
-    shares: float = Field(gt=0)
+    shares: float | None = Field(default=None, gt=0)
+    # Position sizing (BUY only; ignored for SELL). If `shares` is given it
+    # always wins - these are only consulted when `shares` is omitted.
+    sizing_mode: str | None = None  # "FIXED_SHARES" | "FIXED_CAPITAL_PERCENT" | "RISK_PERCENT"
+    capital_percent: float | None = Field(default=None, gt=0, le=100)
+    risk_percent: float | None = Field(default=None, gt=0, le=100)
+    max_position_percent: float = Field(default=PAPER_TRADING_DEFAULT_MAX_POSITION_PERCENT, gt=0, le=100)
+    # Optional risk controls attached to a new BUY position.
+    stop_loss_percent: float | None = Field(default=None, gt=0, le=100)
+    take_profit_percent: float | None = Field(default=None, gt=0)
+    trailing_stop_percent: float | None = Field(default=None, gt=0, le=100)
 
     @field_validator("action")
     @classmethod
@@ -472,6 +616,12 @@ class PaperPositionModel(BaseModel):
     market_value: float | None
     unrealized_pnl: float | None
     unrealized_pnl_percent: float | None
+    stop_loss_percent: float | None = None
+    take_profit_percent: float | None = None
+    trailing_stop_percent: float | None = None
+    entry_signal: str | None = None
+    entry_score: float | None = None
+    entry_date: str | None = None
 
 
 class PaperTradeModel(BaseModel):
@@ -481,6 +631,17 @@ class PaperTradeModel(BaseModel):
     shares: float
     price: float
     realized_pnl: float | None
+    gross_pnl: float | None = None
+    fees: float | None = None
+    slippage: float | None = None
+    net_pnl: float | None = None
+    exit_reason: str | None = None
+    entry_signal: str | None = None
+    entry_score: float | None = None
+    exit_signal: str | None = None
+    exit_score: float | None = None
+    model_version: str | None = None
+    market_regime: str | None = None
 
 
 class PaperPortfolioResponse(BaseModel):
@@ -493,6 +654,10 @@ class PaperPortfolioResponse(BaseModel):
     total_return_percent: float
     realized_pnl: float
     unrealized_pnl: float
+    number_of_positions: int
+    exposure_percent: float
+    largest_position_percent: float
+    cash_percent: float
     positions: list[PaperPositionModel]
     trades: list[PaperTradeModel]
     disclaimer: str = (
@@ -500,6 +665,16 @@ class PaperPortfolioResponse(BaseModel):
         "Position values use real live-retrieved market quotes; the trades themselves "
         "are purely virtual bookkeeping."
     )
+
+
+class PaperRiskResponse(BaseModel):
+    total_exposure_percent: float
+    cash_percent: float
+    largest_position_percent: float
+    number_of_positions: int
+    sector_concentration: dict[str, float]
+    warnings: list[str]
+    methodology: str
 
 
 # --------------------------------------------------------------- Model info
@@ -526,6 +701,46 @@ class ModelPerformanceResponse(BaseModel):
     stability: SignalStabilityModel
     performance: list[SignalPerformanceGroupModel]
     backtest_summary: dict[str, float | int | str | None]
+    meta: DataMeta
+
+
+# ---------------------------------------------------- Regime performance
+
+class RegimePerformanceRequest(BaseModel):
+    ticker: str
+    benchmark: str = Field(default=DEFAULT_BENCHMARK_TICKER)
+    start_date: dt.date
+    end_date: dt.date
+    initial_capital: float = Field(default=DEFAULT_INITIAL_CAPITAL, gt=0)
+    transaction_cost_bps: float = Field(default=DEFAULT_TRANSACTION_COST_BPS, ge=0, le=1000)
+    slippage_bps: float = Field(default=DEFAULT_SLIPPAGE_BPS, ge=0, le=1000)
+    model_version: str = Field(default=MODEL_VERSION_CURRENT)
+
+    @field_validator("end_date")
+    @classmethod
+    def end_after_start_regime(cls, v: dt.date, info):
+        start = info.data.get("start_date")
+        if start is not None and v <= start:
+            raise ValueError("end_date must be after start_date.")
+        return v
+
+
+class RegimeBucketModel(BaseModel):
+    regime: str
+    trading_days: int
+    frequency_percent: float
+    compounded_return_percent: float | None
+    annualized_volatility_percent: float | None
+    sharpe_ratio: float | None
+    number_of_trades: int
+    win_rate_percent: float | None
+
+
+class RegimePerformanceResponse(BaseModel):
+    ticker: str
+    benchmark: str
+    buckets: list[RegimeBucketModel]
+    methodology: str
     meta: DataMeta
 
 
@@ -570,3 +785,30 @@ class MarketOverviewResponse(BaseModel):
 class ErrorResponse(BaseModel):
     error_type: str
     detail: str
+
+
+# ----------------------------------------------------------------- Watchlist
+
+class WatchlistAddRequest(BaseModel):
+    watchlist_id: str = Field(default="default", max_length=64)
+    ticker: str
+
+
+class WatchlistEntryModel(BaseModel):
+    ticker: str
+    company_name: str | None
+    price: float | None
+    change_percent: float | None
+    signal: str | None
+    score: float | None
+    trend_classification: str | None
+    market_regime: str | None
+    data_status: str
+    signal_changed_today: bool
+    error: str | None = None
+
+
+class WatchlistResponse(BaseModel):
+    watchlist_id: str
+    tickers: list[str]
+    entries: list[WatchlistEntryModel]

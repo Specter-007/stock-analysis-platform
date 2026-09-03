@@ -65,6 +65,7 @@ class BacktestResult:
     drawdown_curve: list[EquityPoint] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     trade_stats: dict = field(default_factory=dict)
+    advanced_metrics: dict = field(default_factory=dict)
 
 
 def _build_buy_hold_curve(price_slice: pd.DataFrame, initial_capital: float, cost_rate: float) -> pd.Series:
@@ -84,6 +85,7 @@ def run_backtest(
     benchmark_ticker: str | None = None,
     benchmark_full_price_df: pd.DataFrame | None = None,
     model_version: str = MODEL_VERSION_CURRENT,
+    thresholds: signal_engine.ScoreThresholds = signal_engine.DEFAULT_THRESHOLDS,
 ) -> BacktestResult:
     indicator_df = compute_indicator_frame(full_price_df)
     idx_dates = indicator_df.index
@@ -159,7 +161,7 @@ def run_backtest(
 
         historical_slice = indicator_df.loc[:date]
         try:
-            sig = signal_engine.evaluate(historical_slice, model_version=model_version)
+            sig = signal_engine.evaluate(historical_slice, model_version=model_version, thresholds=thresholds)
             desired_long = sig.signal in ("BUY", "STRONG_BUY")
         except Exception:
             desired_long = in_position
@@ -209,6 +211,46 @@ def run_backtest(
 
     stats = m.trade_stats(trades)
 
+    cagr_pct = m.cagr(initial_capital, final_capital, trading_days)
+    max_dd_pct = m.max_drawdown_percent(equity_series)
+
+    advanced_metrics: dict = {
+        "cagr_percent": round(cagr_pct, 2) if cagr_pct is not None else None,
+        "annualized_volatility_percent": m.annualized_volatility_percent(daily_returns),
+        "sortino_ratio": (round(v, 3) if (v := m.sortino_ratio(daily_returns)) is not None else None),
+        "calmar_ratio": m.calmar_ratio(cagr_pct, max_dd_pct),
+        "average_drawdown_percent": m.average_drawdown_percent(equity_series),
+        "downside_deviation_percent": m.downside_deviation_percent(daily_returns),
+        "max_drawdown_recovery_days": m.max_drawdown_recovery_days(equity_series),
+        "expectancy": m.expectancy(trades),
+        "exposure_percent": m.exposure_percent(trades, trading_days),
+        "turnover_percent": m.turnover_percent(trades, initial_capital),
+        "beta": None,
+        "alpha_percent": None,
+        "tracking_error_percent": None,
+        "information_ratio": None,
+    }
+    advanced_metrics.update(m.average_win_loss(trades))
+
+    if benchmark_ticker and benchmark_curve_points:
+        # Both sides are reindexed onto plain python `date` objects before
+        # aligning: `equity_series.index` is timezone-aware (from yfinance),
+        # while `benchmark_curve_points[i].date` is a naive "YYYY-MM-DD"
+        # string - reindexing a naive-keyed Series against a tz-aware index
+        # silently matches nothing (not an error, just all-NaN), which
+        # previously made beta/alpha/tracking-error/information-ratio None
+        # even when a valid benchmark was supplied. See regression test
+        # `test_beta_alpha_present_with_tz_aware_equity_index`.
+        strategy_by_date = {ts.date(): v for ts, v in equity_series.items()}
+        bench_by_date = {pd.Timestamp(p.date).date(): p.equity for p in benchmark_curve_points}
+        common_dates = sorted(set(strategy_by_date) & set(bench_by_date))
+        strategy_equity_aligned = pd.Series([strategy_by_date[d] for d in common_dates], index=common_dates)
+        bench_equity_aligned = pd.Series([bench_by_date[d] for d in common_dates], index=common_dates)
+        strategy_returns_aligned = strategy_equity_aligned.pct_change()
+        bench_returns_aligned = bench_equity_aligned.pct_change()
+        beta_alpha = m.beta_alpha_tracking_error(strategy_returns_aligned, bench_returns_aligned)
+        advanced_metrics.update(beta_alpha)
+
     return BacktestResult(
         ticker=ticker,
         start_date=str(start_date),
@@ -236,4 +278,5 @@ def run_backtest(
         drawdown_curve=[EquityPoint(date=str(d.date()), equity=round(float(v), 2)) for d, v in drawdown_series.items()],
         warnings=warnings,
         trade_stats=stats,
+        advanced_metrics=advanced_metrics,
     )

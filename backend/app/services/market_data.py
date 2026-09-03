@@ -24,6 +24,7 @@ from app.config import (
     MAJOR_INDEXES,
 )
 from app.services.cache import cache
+from app.services.data_quality import validate_ohlcv
 from app.services.exceptions import DataUnavailableError, TickerNotFoundError
 from app.utils import timeutils
 
@@ -75,6 +76,7 @@ class DataMeta:
     latest_market_timestamp: str | None = None
     market_status: str | None = None
     timeframe: str = "Daily"
+    data_quality: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -84,6 +86,7 @@ class DataMeta:
             "latest_market_timestamp": self.latest_market_timestamp,
             "market_status": self.market_status,
             "timeframe": self.timeframe,
+            "data_quality": self.data_quality,
         }
 
 
@@ -152,14 +155,22 @@ def get_full_daily_history(ticker: str) -> tuple[pd.DataFrame, DataMeta]:
         raise DataUnavailableError(ticker, "no historical candles returned")
 
     df = df.dropna(how="all")
+
+    quality = validate_ohlcv(df, now=pd.Timestamp(timeutils.utc_now()))
+    if not quality.is_valid:
+        logger.warning("Data quality check failed for %s: %s", ticker, "; ".join(quality.issues))
+        raise DataUnavailableError(ticker, "data failed quality validation: " + "; ".join(quality.issues))
+
     latest_ts = df.index[-1].to_pydatetime()
     m_status = timeutils.market_status()
+    data_status = "STALE" if quality.is_stale else "HISTORICAL"
 
     meta = DataMeta(
-        data_status="HISTORICAL",
+        data_status=data_status,
         latest_market_timestamp=timeutils.to_iso(latest_ts),
         market_status=m_status,
         timeframe="Daily",
+        data_quality=quality.to_dict(),
     )
     return df, meta
 

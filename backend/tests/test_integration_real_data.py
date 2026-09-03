@@ -172,6 +172,86 @@ def test_real_paper_trade_uses_real_live_quote():
     assert body["cash"] < 10000
 
 
+def test_real_backtest_includes_advanced_metrics():
+    resp = client.post(
+        "/api/backtest",
+        json={
+            "ticker": "AAPL",
+            "start_date": "2021-01-01",
+            "end_date": "2026-08-01",
+            "benchmark_ticker": "SPY",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    m = body["advanced_metrics"]
+    assert m["cagr_percent"] is not None
+    assert m["beta"] is not None  # benchmark was supplied, so this must not be None
+    assert m["average_win"] is not None or body["number_of_trades"] == 0
+
+
+def test_real_sensitivity_analysis():
+    resp = client.post(
+        "/api/backtest/sensitivity",
+        json={"ticker": "MSFT", "start_date": "2021-01-01", "end_date": "2026-08-01"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["parameters"]) == 2
+    for p in body["parameters"]:
+        assert p["robustness"] in ("HIGHER_ROBUSTNESS", "LOW_ROBUSTNESS", "PARAMETER_INERT", "INSUFFICIENT_DATA")
+
+
+def test_real_out_of_sample_validation():
+    resp = client.post(
+        "/api/backtest/out-of-sample",
+        json={
+            "ticker": "AAPL",
+            "in_sample_start": "2019-01-01", "in_sample_end": "2022-12-31",
+            "validation_start": "2023-01-01", "validation_end": "2024-12-31",
+            "out_of_sample_start": "2025-01-01", "out_of_sample_end": "2026-08-01",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [p["label"] for p in body["periods"]] == ["IN_SAMPLE", "VALIDATION", "OUT_OF_SAMPLE"]
+
+
+def test_real_regime_performance():
+    resp = client.post(
+        "/api/model/regime-performance",
+        json={"ticker": "NVDA", "benchmark": "SPY", "start_date": "2021-01-01", "end_date": "2026-08-01"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["buckets"]) > 0
+    total_days = sum(b["trading_days"] for b in body["buckets"])
+    assert total_days > 0
+
+
+def test_real_data_quality_reported_in_meta():
+    resp = client.get("/api/stock/AAPL/technical")
+    assert resp.status_code == 200
+    quality = resp.json()["meta"]["data_quality"]
+    assert quality is not None
+    assert quality["is_valid"] is True
+
+
+def test_real_watchlist_end_to_end():
+    watchlist_id = "integration_test_watchlist"
+    client.delete(f"/api/watchlist/AAPL?watchlist_id={watchlist_id}")  # ensure clean slate
+    add_resp = client.post("/api/watchlist", json={"watchlist_id": watchlist_id, "ticker": "AAPL"})
+    assert add_resp.status_code == 200
+    body = add_resp.json()
+    entry = next(e for e in body["entries"] if e["ticker"] == "AAPL")
+    assert entry["price"] is not None
+    assert entry["signal"] in ("STRONG_BUY", "BUY", "HOLD", "SELL", "STRONG_SELL")
+
+    remove_resp = client.delete(f"/api/watchlist/AAPL?watchlist_id={watchlist_id}")
+    assert remove_resp.status_code == 200
+    assert remove_resp.json()["tickers"] == []
+
+
 def test_real_backtest_runs_against_real_data():
     resp = client.post(
         "/api/backtest",

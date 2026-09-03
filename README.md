@@ -1,14 +1,17 @@
 # Stock Analyst
 
-A quantitative stock research **and paper-trading** platform. It retrieves real market data from
-Yahoo Finance (via `yfinance`) and runs it through a transparent, deterministic, versioned
-rules-based scoring engine to classify each ticker as **Strong Buy / Buy / Hold / Sell / Strong
-Sell** — with every contributing factor, its category weight, its historical track record, and
-what would invalidate it all shown, not hidden behind a black box.
+A quantitative stock research, **validation**, and paper-trading platform. It retrieves real
+market data from Yahoo Finance (via `yfinance`) and runs it through a transparent, deterministic,
+versioned rules-based scoring engine to classify each ticker as **Strong Buy / Buy / Hold / Sell /
+Strong Sell** — with every contributing factor, its category weight, its historical track record,
+and what would invalidate it all shown, not hidden behind a black box.
 
 Beyond the core signal, the platform adds: signal history and stability tracking, market-regime
-detection, relative-strength and sector comparison, optional fundamental scoring, walk-forward and
-Monte Carlo backtesting robustness checks, and a simulation-only paper-trading portfolio.
+detection (and regime-conditioned performance), relative-strength and sector comparison, optional
+fundamental scoring, a full quantitative Model Evaluation suite (CAGR, Sortino, Calmar, beta/alpha,
+exposure, turnover, and more), out-of-sample validation, parameter sensitivity/robustness analysis,
+walk-forward and Monte Carlo backtesting checks, a watchlist, and an advanced simulation-only
+paper-trading engine with position sizing and stop-loss/take-profit/trailing-stop controls.
 
 > **Not financial advice.** This is a research and educational tool. It does not guarantee returns,
 > does not predict the future, and is not a substitute for professional financial advice. See
@@ -34,18 +37,25 @@ Monte Carlo backtesting robustness checks, and a simulation-only paper-trading p
 14. [Signal History, Stability & Change Detection](#signal-history-stability--change-detection)
 15. [Signal Performance Analytics](#signal-performance-analytics)
 16. [Market Regime, Relative Strength & Sector Comparison](#market-regime-relative-strength--sector-comparison)
-17. [Fundamental Analysis & Optional Fundamental Score](#fundamental-analysis--optional-fundamental-score)
-18. [Backtesting Methodology](#backtesting-methodology)
-19. [Walk-Forward Analysis](#walk-forward-analysis)
-20. [Monte Carlo Robustness](#monte-carlo-robustness)
-21. [Paper Trading](#paper-trading)
-22. [No-Look-Ahead-Bias Guarantee](#no-look-ahead-bias-guarantee)
-23. [Data Freshness & Status Labels](#data-freshness--status-labels)
-24. [yfinance / Yahoo Finance Limitations](#yfinance--yahoo-finance-limitations)
-25. [Financial Disclaimer](#financial-disclaimer)
-26. [Testing](#testing)
-27. [Deployment Considerations](#deployment-considerations)
-28. [GitHub Setup](#github-setup)
+17. [Regime-Conditioned Performance](#regime-conditioned-performance)
+18. [Fundamental Analysis & Optional Fundamental Score](#fundamental-analysis--optional-fundamental-score)
+19. [Backtesting Methodology](#backtesting-methodology)
+20. [Model Evaluation Metrics](#model-evaluation-metrics)
+21. [Out-of-Sample Validation](#out-of-sample-validation)
+22. [Parameter Sensitivity & Robustness](#parameter-sensitivity--robustness)
+23. [Walk-Forward Analysis](#walk-forward-analysis)
+24. [Monte Carlo Robustness](#monte-carlo-robustness)
+25. [Data Quality Layer](#data-quality-layer)
+26. [Watchlist](#watchlist)
+27. [Paper Trading](#paper-trading)
+28. [No-Look-Ahead-Bias Guarantee](#no-look-ahead-bias-guarantee)
+29. [Data Freshness & Status Labels](#data-freshness--status-labels)
+30. [yfinance / Yahoo Finance Limitations](#yfinance--yahoo-finance-limitations)
+31. [Financial Disclaimer](#financial-disclaimer)
+32. [Testing](#testing)
+33. [Deployment Considerations](#deployment-considerations)
+34. [GitHub Setup](#github-setup)
+35. [Known Limitations & Remaining Work](#known-limitations--remaining-work)
 
 ---
 
@@ -120,21 +130,24 @@ stock-analyst/
       main.py                App entrypoint, CORS, router wiring
       config.py               All tunable constants (thresholds, windows, cache TTLs, model versions)
       api/                    HTTP route handlers + exception -> HTTP mapping
-      services/                yfinance wrapper, in-memory TTL cache, typed exceptions
+      services/                yfinance wrapper, in-memory TTL cache, typed exceptions, data-quality validation
       indicators/              Pure indicator math (trend/momentum/volatility/volume) + interpretation
-      signals/                 Scoring engine (versioned), confidence, risk, history/stability/
-                                 change-detection, invalidation conditions, performance analytics
-      market/                  Market regime, relative strength, sector peer comparison
+      signals/                 Scoring engine (versioned, configurable thresholds), confidence, risk,
+                                 history/stability/change-detection, invalidation conditions, performance analytics
+      market/                  Market regime (+ regime-conditioned performance), relative strength, sector comparison
       fundamentals/            Fundamental data extraction + optional fundamental/overall score
-      backtesting/             Backtest engine, metrics, walk-forward analysis, Monte Carlo
-      paper_trading/           JSON-file-backed virtual portfolio (simulation only)
+      backtesting/             Backtest engine + extended metrics, walk-forward, Monte Carlo,
+                                 parameter sensitivity, in-sample/out-of-sample validation
+      paper_trading/           JSON-file-backed virtual portfolio: position sizing, stop-loss/
+                                 take-profit/trailing-stop, cost breakdown, risk dashboard (simulation only)
+      watchlist/               JSON-file-backed watchlist, enriched with live quotes + fresh signals
       models/                  Pydantic request/response schemas
       utils/                   Ticker validation, time/market-hours helpers, shared finance math
     tests/                    pytest suite (unit + API + real-network integration)
 
   frontend/                 Next.js (App Router) + TypeScript + Tailwind CSS
-    app/                      Routes: /, /markets, /analysis, /backtest, /paper-trading, /model
-    components/               UI, by domain: nav, search, stock, backtest, markets, paper-trading, model
+    app/                      Routes: /, /markets, /analysis, /backtest, /paper-trading, /model, /watchlist
+    components/               UI, by domain: nav, search, stock, backtest, markets, paper-trading, model, watchlist
     lib/                      API client, formatting helpers, constants
     hooks/                    Data-fetching hook with cancellation, debounce
     types/                    TypeScript types mirroring the backend's Pydantic schemas
@@ -232,18 +245,26 @@ All responses include a `meta` object: `data_source`, `data_status`, `retrieved_
 | GET | `/api/stock/{ticker}/fundamentals` | Valuation/growth/profitability/balance-sheet metrics (Yahoo Finance `.info`) |
 | GET | `/api/stock/{ticker}/relative-strength?benchmark=SPY` | 1M/3M/6M/1Y return vs. a benchmark |
 | GET | `/api/stock/{ticker}/sector` | Sector peer comparison (curated peer list, live-fetched returns) |
-| POST | `/api/backtest` | Runs the backtest engine (see request body below) |
+| POST | `/api/backtest` | Runs the backtest engine (see request body below); response includes `advanced_metrics` (see [Model Evaluation Metrics](#model-evaluation-metrics)) |
 | POST | `/api/backtest/walk-forward` | Sequential train/test-window robustness analysis |
 | POST | `/api/backtest/monte-carlo` | Bootstrap-resampling robustness simulation over a backtest |
+| POST | `/api/backtest/sensitivity` | BUY/SELL-threshold perturbation + robustness classification |
+| POST | `/api/backtest/out-of-sample` | In-sample / validation / out-of-sample three-period split |
 | GET | `/api/market/status` | Major indexes + gainers/losers from a fixed watchlist |
 | GET | `/api/market/regime?benchmark=SPY` | Deterministic Bull/Bear/Sideways/High-Volatility classification |
 | GET | `/api/search?q=` | Ticker/company search (via Yahoo Finance search) |
 | GET | `/api/model` | Full model methodology reference (versions, weights, thresholds) |
 | GET | `/api/model/performance?ticker=` | Signal counts, stability, performance analytics, and a reference backtest for one ticker |
-| GET | `/api/paper-portfolio?portfolio_id=default` | Current paper-trading portfolio (positions, P&L, live valuation) |
-| POST | `/api/paper-trade` | Execute a virtual BUY/SELL (`portfolio_id`, `ticker`, `action`, `shares`) |
-| GET | `/api/paper-trades?portfolio_id=default` | Trade history for a portfolio |
+| POST | `/api/model/regime-performance` | Regroups a backtest's realized returns by benchmark regime (see [Regime-Conditioned Performance](#regime-conditioned-performance)) |
+| GET | `/api/watchlist?watchlist_id=default` | Enriched watchlist (real quote + fresh signal per ticker) |
+| POST | `/api/watchlist` | Add a ticker (`watchlist_id`, `ticker`) |
+| DELETE | `/api/watchlist/{ticker}?watchlist_id=default` | Remove a ticker |
+| GET | `/api/paper-portfolio?portfolio_id=default` | Current paper-trading portfolio (positions, P&L, live valuation); auto-applies any triggered stop-loss/take-profit/trailing-stop first |
+| POST | `/api/paper-trade` | Execute a virtual BUY/SELL, with optional position sizing and risk controls (see [Paper Trading](#paper-trading)) |
+| GET | `/api/paper-trades?portfolio_id=default` | Trade journal for a portfolio |
 | POST | `/api/paper-portfolio/reset?portfolio_id=default&starting_capital=10000` | Reset a paper-trading portfolio |
+| POST | `/api/paper-portfolio/close-all?portfolio_id=default` | Liquidate every open position (`exit_reason=END_OF_TEST`) |
+| GET | `/api/paper-portfolio/risk?portfolio_id=default` | Exposure/concentration/sector risk dashboard |
 | GET | `/api/health` | Liveness check |
 
 **POST `/api/backtest` body:**
@@ -406,6 +427,17 @@ the past, not a forecast.
   only decides *which* tickers to compare — every return shown is fetched live). Sectors outside
   the curated map return an explicit "unavailable" state rather than a guess.
 
+## Regime-Conditioned Performance
+
+`POST /api/model/regime-performance` answers "how did this strategy actually perform on days the
+market was classified Bull / Bear / Sideways / High-Volatility?" It runs one ordinary backtest,
+classifies the benchmark's regime for every day in that period causally (using only data through
+that day), and then **regroups the strategy's own already-realized daily returns** by which regime
+was active — it is not a separate simulation per regime. Trades are bucketed by the regime active
+on their entry date. Each bucket reports trading days, % of the period, compounded return,
+annualized volatility, Sharpe, trade count, and win rate — all `null` rather than fabricated if a
+regime bucket has too little data.
+
 ## Fundamental Analysis & Optional Fundamental Score
 
 `GET /api/stock/{ticker}/fundamentals` surfaces valuation (P/E, forward P/E, PEG, P/S, P/B),
@@ -439,6 +471,60 @@ separately; the overall score is never presented as if it were the technical sco
 - **Limitations (also shown in the UI):** no taxes, no dividends, no borrowing costs, no partial
   fills, no execution latency modeling. Past performance does not guarantee future results.
 
+## Model Evaluation Metrics
+
+Every `/api/backtest` response includes an `advanced_metrics` block answering "is this actually
+useful, or does it only look good in this one backtest?":
+
+| Metric | Notes |
+|---|---|
+| CAGR | Compound annual growth rate (same formula as `annualized_return`) |
+| Annualized volatility | Standard deviation of daily returns, annualized |
+| Sortino ratio | Like Sharpe, but penalizes only downside deviation |
+| Calmar ratio | CAGR ÷ \|max drawdown\| |
+| Average drawdown | Mean depth of every distinct drawdown episode, not just the single worst one |
+| Max drawdown recovery (days) | `null` if the equity curve never made a new high before the period ended |
+| Expectancy | Average P&L per trade, in currency |
+| Average win / loss, median trade | |
+| Exposure % | Share of trading days the strategy actually held a position |
+| Turnover % | Total traded notional ÷ starting capital |
+| Beta, alpha, tracking error, information ratio | Computed against the supplied benchmark's daily returns; `null` if no benchmark was supplied or there's too little overlapping data |
+
+Every field is individually `null` (never a fabricated number) when it can't be computed from the
+available data — e.g. a strategy with zero closed trades has no expectancy or average win/loss.
+
+## Out-of-Sample Validation
+
+`POST /api/backtest/out-of-sample` runs three explicit, chronologically ordered, non-overlapping
+periods — `IN_SAMPLE`, `VALIDATION`, `OUT_OF_SAMPLE` — through the **same** `run_backtest()` engine
+used everywhere else. There is no separate "training" step (the signal engine has no fitted
+parameters); the value of the split is procedural: it forces a pre-committed boundary so the
+out-of-sample number was never visible while forming an opinion of the strategy. The request is
+rejected (422) if the six boundary dates aren't strictly increasing. Each period reports its own
+return, CAGR, Sharpe, Sortino, max drawdown, trade count, and win rate — a degrading result from
+in-sample to out-of-sample is a real, common, and important finding this feature is designed to
+surface, not a bug.
+
+## Parameter Sensitivity & Robustness
+
+`POST /api/backtest/sensitivity` is the primary overfitting-detection tool. It perturbs the BUY and
+SELL score thresholds independently around their defaults (`[55, 60, 65, 70, 75]` and
+`[20, 25, 30, 35, 40]`) and re-runs the backtest engine for each value, then classifies each
+parameter's robustness by the coefficient of variation (std/\|mean\|) of total return across all
+tested values: `HIGHER_ROBUSTNESS` (CV < 0.5), `LOW_ROBUSTNESS` (CV ≥ 0.5), or
+**`PARAMETER_INERT`** when every tested value produced an identical result. The `PARAMETER_INERT`
+case is not a hypothetical: the current long/flat engine's entry/exit rule only checks whether the
+signal is BUY-class, so the SELL/STRONG_SELL boundary (`sell_threshold`) cannot change a single
+trade at any value — reporting that as "robust" would misrepresent "has no effect" as "stable
+performance," so it's called out explicitly instead (see
+`backend/tests/test_v3_sensitivity_and_oos.py::test_sensitivity_detects_inert_parameter`). The
+`robust_region` is the longest contiguous run of tested values (including the default) that keep
+the same return sign as the default.
+
+**Scope limit:** only the two score thresholds are perturbed, not indicator periods (RSI/SMA/MACD
+windows) — parameterizing those would require a deeper refactor of the indicator-computation
+pipeline. Documented here rather than silently omitted.
+
 ## Walk-Forward Analysis
 
 `POST /api/backtest/walk-forward` partitions a ticker's full available history into sequential,
@@ -463,15 +549,60 @@ median/worst simulated maximum drawdown. This is a stress/robustness check on th
 actually observed — it assumes the future resembles that sample's distribution and is explicitly
 **not** a forecast. Pass a `seed` for reproducible output.
 
+## Data Quality Layer
+
+`app/services/data_quality.py` validates every OHLCV fetch before indicators are computed -
+chronological ordering, duplicate timestamps, missing OHLC values, negative prices, impossible
+High/Low relationships (e.g. High < Low), negative volume, suspicious gaps (>10 calendar days
+between daily candles), and staleness (latest candle >5 days old). It never repairs or substitutes
+values: fundamentally unusable data (non-chronological, negative prices) raises
+`DataUnavailableError` rather than proceeding; survivable issues are attached as a `data_quality`
+object inside every response's `meta` block, and `data_status` becomes `STALE` when appropriate
+(joining the existing `LIVE` / `DELAYED` / `MARKET_CLOSED` / `HISTORICAL` / `UNAVAILABLE` set - see
+[Data Freshness & Status Labels](#data-freshness--status-labels)).
+
+## Watchlist
+
+`GET/POST /api/watchlist`, `DELETE /api/watchlist/{ticker}`. A small JSON-file-backed list of
+tickers (`backend/data/watchlists/`, gitignored) enriched, on every read, with each ticker's real
+current quote and a freshly computed signal from the same deterministic engine used everywhere
+else - never a cached or precomputed summary. A ticker that fails to refresh shows an explicit
+per-row error rather than stale or fabricated data; the rest of the list still loads normally.
+
 ## Paper Trading
 
-A **simulation-only** virtual portfolio: no real money, no brokerage connection, no real orders.
-State is persisted per `portfolio_id` in a small JSON file (`backend/data/paper_trading/`, gitignored)
-rather than a database — durable across backend restarts without new infrastructure. Buying and
-selling use a real, live-retrieved quote (`fast_info.lastPrice`) for execution and for valuing
-open positions; average entry price, realized P&L (on sell), and unrealized P&L (mark-to-market)
-are all computed from that real price, never fabricated. Every API response and the UI both
-prominently label this feature as simulated.
+A **simulation-only** virtual portfolio: no real money, no brokerage connection, no real orders,
+long-only, no leverage. State is persisted per `portfolio_id` in a small JSON file
+(`backend/data/paper_trading/`, gitignored) rather than a database — durable across backend
+restarts without new infrastructure.
+
+- **Execution & valuation:** every buy/sell uses a real, live-retrieved quote (`fast_info.lastPrice`).
+- **Realistic costs:** commission + slippage (`PAPER_TRADING_COMMISSION_BPS`/`SLIPPAGE_BPS`, 5 bps
+  each by default) are charged as a price haircut on both the entry and exit leg of every trade.
+  Every closed trade reports **gross P&L, fees, slippage, and net P&L separately** - never one
+  opaque number.
+- **Position sizing** (`sizing_mode` on `POST /api/paper-trade`): `FIXED_SHARES` (caller specifies
+  the share count), `FIXED_CAPITAL_PERCENT` (allocate X% of current portfolio equity), or
+  `RISK_PERCENT` (size so that a stop-loss hit loses exactly X% of equity — requires
+  `stop_loss_percent`). All three are hard-capped by `max_position_percent` (default 20%) and by
+  available cash; it is mathematically impossible for a paper trade to create negative cash.
+- **Stop-loss / take-profit / trailing-stop:** optional, attached per-position at entry. Checked
+  against the current live price every time the portfolio is loaded (`GET /api/paper-portfolio`
+  runs this check first) and auto-closed with an explicit `exit_reason`: `MODEL_SELL`,
+  `STOP_LOSS`, `TAKE_PROFIT`, `TRAILING_STOP`, `END_OF_TEST` (via `POST
+  /api/paper-portfolio/close-all`), or `MANUAL_PAPER_EXIT`.
+- **Trade journal:** every closed trade records the signal and score at entry and at exit, the
+  market regime at entry, the model version, and the full gross/fees/slippage/net cost breakdown -
+  fully auditable, not just a running P&L number.
+- **Portfolio risk dashboard** (`GET /api/paper-portfolio/risk`): exposure %, cash %, largest
+  position %, and sector concentration (via each held ticker's real, live-fetched sector), with
+  threshold-based warnings (`HIGH_CONCENTRATION`, `LOW_CASH`, `HIGH_DRAWDOWN`). Portfolio-level
+  volatility/Sharpe/Sortino/beta/historical-drawdown are intentionally **not** included: they would
+  require a persisted daily equity-curve history that this lightweight ledger doesn't keep, and
+  approximating them without that history would mean reporting a number that isn't actually
+  measuring what it claims to. This is a documented scope limit, not an oversight.
+
+Every API response and the UI both prominently label this feature as simulated.
 
 ## No-Look-Ahead-Bias Guarantee
 
@@ -499,12 +630,21 @@ Every relevant response carries `data_status`, one of:
   delayed feed.
 - **`MARKET_CLOSED`** — market is not in its regular session; showing the latest available close.
 - **`HISTORICAL`** — a range of past candles (charts, indicators, signal, backtest).
+- **`STALE`** — the [data quality layer](#data-quality-layer) found the latest candle to be more
+  than 5 days old; shown instead of `HISTORICAL` so the UI never implies fresher data than it has.
 - **`UNAVAILABLE`** — Yahoo Finance could not be reached or returned no usable data.
+
+Every response's `meta` also carries a `data_quality` object (duplicate timestamps, missing OHLC
+values, negative prices, invalid High/Low relationships, invalid volume, suspicious gaps, and the
+staleness flag) - see [Data Quality Layer](#data-quality-layer).
 
 The signal endpoint additionally reports `signal_timeframe` (always `"Daily"` today),
 `signal_generated_at`, `latest_candle_date`, and `is_latest_candle_complete` (false when the
 market is open and the latest daily candle is still forming) so the UI never implies a daily
-model is a tick-by-tick real-time signal.
+model is a tick-by-tick real-time signal. `retrieved_at` (when this server fetched the data),
+`latest_market_timestamp` (the data's own timestamp), and `signal_generated_at` (when the signal
+was computed) are three distinct fields precisely so freshness, data age, and signal age are never
+conflated into one ambiguous "updated" label.
 
 ## yfinance / Yahoo Finance Limitations
 
@@ -536,25 +676,45 @@ cd backend
 venv\Scripts\python -m pytest -q
 ```
 
-151+ tests in `backend/tests/` cover: ticker validation, every indicator calculation (SMA, EMA,
+**248 tests** in `backend/tests/` cover: ticker validation, every indicator calculation (SMA, EMA,
 RSI, MACD, Bollinger Bands, ATR, ROC, historical volatility, relative volume) plus the interpretation
 layer that turns them into UI text (regression-tested after a real bug where the Bollinger lower-band
 description was accidentally copied from the upper band), signal scoring and threshold mapping under
-**both model versions**, confidence methodology, risk assessment, signal history/stability/change
-detection/invalidation-conditions/performance analytics, market regime/relative-strength/sector
-comparison, fundamental data extraction and scoring, backtesting (transaction costs, slippage,
-drawdown, Sharpe, trade stats, and the no-look-ahead-bias proofs above), walk-forward analysis
+**both model versions** with configurable thresholds, confidence methodology, risk assessment,
+signal history/stability/change-detection/invalidation-conditions/performance analytics, market
+regime/relative-strength/sector comparison, regime-conditioned performance, fundamental data
+extraction and scoring, the extended Model Evaluation metrics suite (CAGR, Sortino, Calmar,
+drawdown recovery, expectancy, exposure, turnover, beta/alpha/tracking-error/information-ratio),
+backtesting (transaction costs, slippage, drawdown, Sharpe, trade stats), out-of-sample validation,
+parameter sensitivity (including the `PARAMETER_INERT` detection above), walk-forward analysis
 (including a regression test that recent folds are preferred over the oldest ones), Monte Carlo
-robustness (including reproducibility with a fixed seed), paper trading (buy/sell/reset/P&L, with
-an isolated temp-directory store and mocked quotes), and API-level tests (response shape, error
-mapping, disclaimer content) with `yfinance` calls monkeypatched for speed and determinism.
+robustness (including reproducibility with a fixed seed), the data-quality validation layer
+(constructed with deliberately corrupted synthetic OHLCV data - duplicates, negative prices,
+impossible High/Low relationships, negative volume, gaps, staleness), advanced paper trading
+(position sizing, stop-loss/take-profit/trailing-stop auto-exits, cost breakdown, portfolio risk
+warnings, all with an isolated temp-directory store and mocked quotes), watchlist CRUD, and
+API-level tests (response shape, error mapping, disclaimer content) with `yfinance` calls
+monkeypatched for speed and determinism.
+
+**The most important test file is `tests/test_v3_no_look_ahead.py`**: rather than only proving
+indicators are unaffected by *truncating* future data (the older, weaker test), it directly proves
+that *mutating* future prices to a completely different, independently-generated path never changes
+a signal, an indicator value, a signal-history entry, or a backtest trade decided before that point -
+for the signal engine, the full signal history, and the backtest engine.
 
 `tests/test_integration_real_data.py` is a **separate, real-network** suite that hits live Yahoo
 Finance data for `AAPL`, `MSFT`, `NVDA`, and an invalid ticker — covering the overview, technical,
 signal (incl. model version/score breakdown/stability), signal-history, fundamentals,
-relative-strength, market-regime, model-info, walk-forward, Monte Carlo, paper-trade, and backtest
+relative-strength, market-regime, regime-performance, model-info, out-of-sample, sensitivity,
+walk-forward, Monte Carlo, watchlist, paper-trade, and backtest (incl. `advanced_metrics`)
 endpoints — and inspects the actual returned structure (not just HTTP 200). It auto-skips if no
 network access is available.
+
+Two real bugs were found and fixed via real-data testing during this pass (both timezone-naive vs.
+timezone-aware datetime mismatches - real yfinance data is tz-aware, synthetic test fixtures were
+not, so unit tests alone did not catch them): `beta`/`alpha`/`tracking_error`/`information_ratio`
+silently returning `null` even with a valid benchmark supplied, and a crash in regime-conditioned
+performance. Both now have dedicated regression tests using a tz-localized fixture.
 
 Frontend checks:
 
@@ -594,3 +754,27 @@ git push -u origin main
 `.gitignore` at the repo root excludes `node_modules/`, `.next/`, `__pycache__/`, `venv/`, and all
 `.env*` files except the committed `.env.example` templates. No secrets are required for local
 development — the backend needs no API keys at all.
+
+## Known Limitations & Remaining Work
+
+Documented honestly rather than silently omitted:
+
+- **Parameter sensitivity** only perturbs the BUY/SELL score thresholds, not indicator periods
+  (RSI/SMA/EMA/MACD windows) or factor weights — see [Parameter Sensitivity & Robustness](#parameter-sensitivity--robustness).
+- **Portfolio-level paper-trading risk metrics** (volatility, Sharpe, Sortino, beta, historical
+  drawdown) are not computed - they'd need a persisted daily equity-curve history this lightweight
+  ledger doesn't keep. Exposure, cash %, concentration, and sector concentration are computed and
+  accurate. See [Paper Trading](#paper-trading).
+- **Portfolio-level (multi-ticker) backtesting** is not implemented - backtests, walk-forward,
+  sensitivity, out-of-sample, and Monte Carlo all operate on a single ticker at a time.
+- **Stock comparison** (side-by-side multi-ticker technical/fundamental/risk comparison) and a
+  unified "research workspace" navigation flow are not implemented as dedicated pages - the
+  underlying data for each is already available via the existing per-ticker endpoints.
+- **Custom strategy parameters** (a UI for overriding thresholds/weights outside of the sensitivity
+  endpoint, with an explicit "CUSTOM MODEL" label) are not exposed beyond the `model_version` and
+  sensitivity-analysis paths already described above.
+- The watchlist and paper-trading stores are single-user JSON files with no authentication - fine
+  for local/personal use, not suitable for multi-tenant deployment without adding a real user
+  system first.
+- Sector peer comparison covers a curated set of ~11 GICS-style sectors
+  (`app.config.SECTOR_PEER_MAP`) - a ticker outside that map shows an explicit "unavailable" state.

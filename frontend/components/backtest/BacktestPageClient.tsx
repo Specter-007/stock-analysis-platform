@@ -9,6 +9,7 @@ import { MetricsGrid } from "./MetricsGrid";
 import { EquityChart } from "./EquityChart";
 import { DrawdownChart } from "./DrawdownChart";
 import { TradesTable } from "./TradesTable";
+import { ModelEvaluationPanel } from "./ModelEvaluationPanel";
 import { WalkForwardPanel } from "./WalkForwardPanel";
 import { MonteCarloPanel } from "./MonteCarloPanel";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -85,6 +86,8 @@ export default function BacktestPageClient() {
 
             <MetricsGrid result={result} />
           </Card>
+
+          <ModelEvaluationPanel result={result} />
 
           <Card>
             <CardHeader title="Equity Curve" subtitle="Strategy vs. buy & hold vs. benchmark, mark-to-market daily" />

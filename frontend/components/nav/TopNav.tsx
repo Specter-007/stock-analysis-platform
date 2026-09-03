@@ -11,6 +11,7 @@ const NAV_LINKS = [
   { href: "/", label: "Overview" },
   { href: "/markets", label: "Markets" },
   { href: "/analysis", label: "Analysis" },
+  { href: "/watchlist", label: "Watchlist" },
   { href: "/backtest", label: "Backtesting" },
   { href: "/paper-trading", label: "Paper Trading" },
   { href: "/model", label: "Model" },

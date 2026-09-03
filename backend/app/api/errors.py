@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from app.paper_trading.service import PaperTradingError
 from app.services.exceptions import DataUnavailableError, InsufficientHistoryError, TickerNotFoundError
 from app.utils.validation import InvalidTickerError
+from app.watchlist.service import WatchlistError
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,10 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(PaperTradingError)
     async def paper_trading_error_handler(request: Request, exc: PaperTradingError):
         return JSONResponse(status_code=400, content=_error_body("PAPER_TRADING_ERROR", str(exc)))
+
+    @app.exception_handler(WatchlistError)
+    async def watchlist_error_handler(request: Request, exc: WatchlistError):
+        return JSONResponse(status_code=400, content=_error_body("WATCHLIST_ERROR", str(exc)))
 
     @app.exception_handler(InvalidTickerError)
     async def invalid_ticker_handler(request: Request, exc: InvalidTickerError):
