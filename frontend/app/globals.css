@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+:root {
+  /* Surfaces */
+  --color-bg: #05070c;
+  --color-bg-elevated: #0a0d15;
+  --color-card: #0e1420;
+  --color-card-hover: #121a29;
+  --color-border: #1f2937;
+  --color-border-strong: #2a3441;
+
+  /* Text */
+  --color-text-primary: #e7ecf3;
+  --color-text-secondary: #b3bdcc;
+  --color-text-muted: #7c8798;
+  --color-text-faint: #545e6e;
+
+  /* Financial semantics - never rely on these alone; always pair with an
+     icon/label per the accessibility guidance. */
+  --color-bullish: #26a69a;
+  --color-bullish-dim: #1b3934;
+  --color-bearish: #ef5350;
+  --color-bearish-dim: #3a2020;
+  --color-neutral: #8b96a5;
+  --color-warning: #f5a623;
+  --color-warning-dim: #3a2f14;
+
+  /* Accent (interactive elements, links, focus) - distinct from bullish
+     green so "clickable" and "positive" are never visually confused. */
+  --color-accent: #4c8eff;
+  --color-accent-dim: #1a2b4a;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SFMono-Regular", monospace;
+}
+
+@theme inline {
+  --color-bg: var(--color-bg);
+  --color-bg-elevated: var(--color-bg-elevated);
+  --color-card: var(--color-card);
+  --color-card-hover: var(--color-card-hover);
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-muted: var(--color-text-muted);
+  --color-text-faint: var(--color-text-faint);
+
+  --color-bullish: var(--color-bullish);
+  --color-bullish-dim: var(--color-bullish-dim);
+  --color-bearish: var(--color-bearish);
+  --color-bearish-dim: var(--color-bearish-dim);
+  --color-neutral: var(--color-neutral);
+  --color-warning: var(--color-warning);
+  --color-warning-dim: var(--color-warning-dim);
+  --color-accent: var(--color-accent);
+  --color-accent-dim: var(--color-accent-dim);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-feature-settings: "tnum" 1, "cv11" 1;
+}
+
+::selection {
+  background: var(--color-accent-dim);
+  color: var(--color-text-primary);
+}
+
+/* Tabular numerals everywhere numbers appear in dense tables */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Visible focus ring for keyboard navigation - never remove */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
