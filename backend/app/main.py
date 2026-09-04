@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.errors import register_exception_handlers
 from app.api.routes_backtest import router as backtest_router
 from app.api.routes_comparison import router as comparison_router
+from app.api.routes_experiments import router as experiments_router
 from app.api.routes_market import router as market_router
 from app.api.routes_model import router as model_router
 from app.api.routes_paper_trading import router as paper_trading_router
@@ -47,6 +48,7 @@ app.include_router(model_router)
 app.include_router(paper_trading_router)
 app.include_router(watchlist_router)
 app.include_router(comparison_router)
+app.include_router(experiments_router)
 
 
 @app.get("/api/health", tags=["meta"])

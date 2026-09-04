@@ -43,4 +43,5 @@ frontend/CLAUDE.md
 # Paper-trading portfolio state (local simulation data, not source).
 backend/data/paper_trading/
 backend/data/watchlists/
+backend/data/experiments/
 

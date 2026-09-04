@@ -12,6 +12,8 @@ from app.config import (
     DEFAULT_INITIAL_CAPITAL,
     DEFAULT_SLIPPAGE_BPS,
     DEFAULT_TRANSACTION_COST_BPS,
+    EXPERIMENT_COMPARE_MAX,
+    EXPERIMENT_COMPARE_MIN,
     MODEL_VERSION_CURRENT,
     PAPER_TRADING_DEFAULT_MAX_POSITION_PERCENT,
     SUPPORTED_MODEL_VERSIONS,
@@ -1227,3 +1229,151 @@ class ModelComparisonResponse(BaseModel):
     forward_comparison: list[ModelVersionForwardSummary]
     methodology: str
     meta: DataMeta
+
+
+# ------------------------------------------------------ Experiment Lab (V5)
+
+EXPERIMENT_DATA_MINING_METHODOLOGY = (
+    "Each experiment's (ticker universe, date range) group count is shown so that repeatedly "
+    "searching the same historical data for a better result is visible rather than hidden. This "
+    "is disclosure, not a statistical correction: no p-value or significance test is applied "
+    "automatically. Repeatedly testing variations on the same historical data increases the risk "
+    "of overfitting/data-mining bias - use out-of-sample and walk-forward validation, and treat a "
+    "\"best in-sample\" configuration as a hypothesis to re-test, not a conclusion."
+)
+
+
+class PortfolioConstraintsInput(BaseModel):
+    max_position_weight_percent: float = Field(default=100.0, gt=0, le=100)
+    min_position_weight_percent: float = Field(default=0.0, ge=0, le=100)
+    max_holdings: int | None = Field(default=None, gt=0)
+    cash_allocation_percent: float = Field(default=0.0, ge=0, lt=100)
+    sector_cap_percent: float | None = Field(default=None, gt=0, le=100)
+
+
+class ExperimentConfigModel(BaseModel):
+    model_version: str = Field(default=MODEL_VERSION_CURRENT)
+    tickers: list[str] = Field(min_length=1, max_length=20)
+    benchmark: str = Field(default=DEFAULT_BENCHMARK_TICKER)
+    start_date: dt.date
+    end_date: dt.date
+    initial_capital: float = Field(default=DEFAULT_INITIAL_CAPITAL, gt=0)
+    commission_bps: float = Field(default=DEFAULT_TRANSACTION_COST_BPS, ge=0, le=1000)
+    slippage_bps: float = Field(default=DEFAULT_SLIPPAGE_BPS, ge=0, le=1000)
+    allocation_method: str | None = None
+    rebalance_frequency: str | None = None
+    portfolio_constraints: PortfolioConstraintsInput | None = None
+    run_out_of_sample: bool = False
+    run_walk_forward: bool = False
+    run_sensitivity: bool = False
+    run_monte_carlo: bool = False
+    run_regime_analysis: bool = False
+    run_cost_stress: bool = False
+    monte_carlo_simulations: int = Field(default=1000, ge=100, le=5000)
+    monte_carlo_seed: int | None = None
+    sensitivity_parameters: list[str] = Field(default_factory=lambda: ["buy_threshold", "sell_threshold"])
+    walk_forward_train_years: float = Field(default=2.0, gt=0, le=20)
+    walk_forward_test_years: float = Field(default=1.0, gt=0, le=10)
+    walk_forward_max_folds: int = Field(default=5, ge=1, le=20)
+
+    @field_validator("model_version")
+    @classmethod
+    def valid_model_version_experiment(cls, v: str) -> str:
+        if v not in SUPPORTED_MODEL_VERSIONS:
+            return MODEL_VERSION_CURRENT
+        return v
+
+    @field_validator("end_date")
+    @classmethod
+    def end_after_start_experiment(cls, v: dt.date, info):
+        start = info.data.get("start_date")
+        if start is not None and v <= start:
+            raise ValueError("end_date must be after start_date.")
+        return v
+
+    @field_validator("tickers")
+    @classmethod
+    def no_duplicate_tickers_experiment(cls, v: list[str]) -> list[str]:
+        if len(set(t.upper() for t in v)) != len(v):
+            raise ValueError("Duplicate tickers are not allowed.")
+        return v
+
+
+class CreateExperimentRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    config: ExperimentConfigModel
+    notes: str = Field(default="", max_length=5000)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+
+
+class ValidationOutcomeModel(BaseModel):
+    requested: bool
+    completed: bool
+    error: str | None = None
+    result: dict | None = None
+
+
+class ExperimentResultsModel(BaseModel):
+    backtest: ValidationOutcomeModel
+    out_of_sample: ValidationOutcomeModel
+    walk_forward: ValidationOutcomeModel
+    sensitivity: ValidationOutcomeModel
+    monte_carlo: ValidationOutcomeModel
+    regime_performance: ValidationOutcomeModel
+    cost_stress: ValidationOutcomeModel
+
+
+class DataProvenanceModel(BaseModel):
+    data_source: str
+    retrieved_at: str
+    data_status: str
+    tickers_retrieved: list[str]
+    tickers_unavailable: dict[str, str]
+    latest_market_timestamp: str | None = None
+    timeframe: str = "Daily"
+
+
+class ExperimentResponse(BaseModel):
+    id: str
+    name: str
+    created_at: str
+    updated_at: str
+    status: str
+    config: ExperimentConfigModel
+    fingerprint: str
+    notes: str
+    tags: list[str]
+    results: ExperimentResultsModel | None = None
+    data_provenance: DataProvenanceModel | None = None
+    error: str | None = None
+    forward_portfolio_id: str | None = None
+    reproduced_from: str | None = None
+    archived: bool = False
+
+
+class ExperimentListRowModel(BaseModel):
+    experiment: ExperimentResponse
+    group_count: int
+    data_mining_warning: bool
+
+
+class ExperimentListResponse(BaseModel):
+    experiments: list[ExperimentListRowModel]
+    methodology: str = EXPERIMENT_DATA_MINING_METHODOLOGY
+
+
+class DuplicateExperimentRequest(BaseModel):
+    new_name: str | None = Field(default=None, max_length=200)
+
+
+class ArchiveExperimentRequest(BaseModel):
+    archived: bool = True
+
+
+class CompareExperimentsRequest(BaseModel):
+    experiment_ids: list[str] = Field(min_length=EXPERIMENT_COMPARE_MIN, max_length=EXPERIMENT_COMPARE_MAX)
+
+
+class CompareExperimentsResponse(BaseModel):
+    experiments: list[ExperimentResponse]
+    warnings: list[str]
