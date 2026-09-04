@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.timeutil import utcnow_naive as _utcnow
 
 # Every notification type corresponds to a real, already-occurring backend
 # event - see app.notifications.service. There is no path in this codebase
@@ -21,9 +22,6 @@ def _uuid_str() -> str:
     return str(uuid.uuid4())
 
 
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
 
 class Notification(Base):
     __tablename__ = "notifications"
@@ -36,5 +34,5 @@ class Notification(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     target_route: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

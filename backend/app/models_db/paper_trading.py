@@ -1,21 +1,19 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.timeutil import utcnow_naive as _utcnow
 from app.db.types import portable_json
 
 
 def _uuid_str() -> str:
     return str(uuid.uuid4())
 
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class PaperPortfolioDB(Base):
@@ -32,7 +30,7 @@ class PaperPortfolioDB(Base):
     # to data/paper_trading/<id>.json - preserved byte-for-shape so the
     # unchanged app.paper_trading.service logic can keep operating on it.
     state: Mapped[dict] = mapped_column(portable_json(), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )

@@ -1,21 +1,19 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.timeutil import utcnow_naive as _utcnow
 from app.db.types import portable_json
 
 
 def _uuid_str() -> str:
     return str(uuid.uuid4())
 
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class WatchlistDB(Base):
@@ -30,7 +28,7 @@ class WatchlistDB(Base):
     # each keep their own "default" watchlist without collision.
     slug: Mapped[str] = mapped_column(String(64), nullable=False, default="default")
     tickers: Mapped[list] = mapped_column(portable_json(), nullable=False, default=list)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )

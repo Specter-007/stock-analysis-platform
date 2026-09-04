@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.timeutil import utcnow_naive as _utcnow
 
 PURPOSE_PASSWORD_RESET = "PASSWORD_RESET"
 PURPOSE_EMAIL_VERIFY = "EMAIL_VERIFY"
@@ -16,9 +17,6 @@ PURPOSE_EMAIL_CHANGE = "EMAIL_CHANGE"
 def _uuid_str() -> str:
     return str(uuid.uuid4())
 
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class AuthToken(Base):
@@ -38,6 +36,6 @@ class AuthToken(Base):
     # Only populated for PURPOSE_EMAIL_CHANGE - the new address is not
     # applied to the user record until this token is verified.
     new_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

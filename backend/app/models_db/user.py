@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.db.timeutil import utcnow_naive as _utcnow
 
 ROLE_USER = "USER"
 ROLE_ADMIN = "ADMIN"
@@ -15,9 +16,6 @@ ROLE_ADMIN = "ADMIN"
 def _uuid_str() -> str:
     return str(uuid.uuid4())
 
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class User(Base):
@@ -35,12 +33,12 @@ class User(Base):
     # Set when a user requests account deletion; the account is disabled
     # immediately and the row is anonymized/removed by the deletion workflow
     # (see app.auth.service.delete_account and docs/AUTHENTICATION.md).
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
-    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     preferences: Mapped["UserPreferences"] = relationship(
         back_populates="user", uselist=False, cascade="all, delete-orphan"
@@ -62,12 +60,12 @@ class UserPreferences(Base):
     # is a distinct, separately-opted-in flag - accepting the Terms of
     # Service must never imply marketing consent.
     marketing_consent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    privacy_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    privacy_accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    onboarding_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    onboarding_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
 
     user: Mapped["User"] = relationship(back_populates="preferences")

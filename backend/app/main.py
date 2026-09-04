@@ -1,11 +1,14 @@
 import logging
-import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.errors import register_exception_handlers
+from app.api.routes_auth import router as auth_router
 from app.api.routes_backtest import router as backtest_router
 from app.api.routes_comparison import router as comparison_router
 from app.api.routes_experiments import router as experiments_router
@@ -15,6 +18,9 @@ from app.api.routes_paper_trading import router as paper_trading_router
 from app.api.routes_stock import router as stock_router
 from app.api.routes_watchlist import router as watchlist_router
 from app.config import EXPERIMENTS_DATA_DIR, MODEL_VERSION_CURRENT, PAPER_TRADING_DATA_DIR
+from app.rate_limit import limiter
+from app.security_headers import SecurityHeadersMiddleware
+from app.settings import CORS_ALLOWED_ORIGINS
 from app.utils.logging_config import configure_logging
 
 configure_logging(logging.INFO)
@@ -29,12 +35,18 @@ app = FastAPI(
     version=f"2.0.0 (quant model v{MODEL_VERSION_CURRENT})",
 )
 
-_default_origins = "http://localhost:3000,http://127.0.0.1:3000"
-allowed_origins = os.environ.get("CORS_ALLOWED_ORIGINS", _default_origins).split(",")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
+# CORS_ALLOWED_ORIGINS is validated at import time (app.settings) to never be
+# "*" when APP_ENV=production and credentials are allowed - a wildcard origin
+# combined with allow_credentials=True would let any site read a signed-in
+# user's cookies via a cross-origin fetch.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in allowed_origins if o.strip()],
+    allow_origins=CORS_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -42,6 +54,7 @@ app.add_middleware(
 
 register_exception_handlers(app)
 
+app.include_router(auth_router)
 app.include_router(stock_router)
 app.include_router(backtest_router)
 app.include_router(market_router)

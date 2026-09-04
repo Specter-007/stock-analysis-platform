@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.timeutil import utcnow_naive as _utcnow
 from app.db.types import portable_json
 
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class ExperimentDB(Base):
@@ -35,7 +33,7 @@ class ExperimentDB(Base):
     forward_portfolio_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reproduced_from: Mapped[str | None] = mapped_column(String(40), nullable=True)
     archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+        DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
