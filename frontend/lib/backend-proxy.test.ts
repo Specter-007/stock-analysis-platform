@@ -109,4 +109,79 @@ describe("proxyToBackend", () => {
     const forwardedHeaders = fetchMock.mock.calls[0][1].headers as Headers;
     expect(forwardedHeaders.has("host")).toBe(false);
   });
+
+  it("always sets Cache-Control: no-store on the proxied response", async () => {
+    // This is a personalized, cookie-authenticated API proxy - if any layer
+    // (Vercel's edge, an intermediate CDN, the browser's own cache) ever
+    // cached a response here, a stale unauthenticated 401 could keep being
+    // served to a now-authenticated user. Explicit regardless of whether
+    // any specific caching layer is confirmed to be the production cause.
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const req = new NextRequest("http://frontend.example/api/auth/me");
+    const res = await proxyToBackend(req, ["auth", "me"]);
+
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("exposes safe (non-sensitive) debug headers describing cookie flow", async () => {
+    const mockResponse = new Response("{}", {
+      status: 200,
+      headers: [
+        ["set-cookie", "session_token=abc123; HttpOnly; Path=/; SameSite=lax"],
+        ["set-cookie", "csrf_token=xyz789; Path=/; SameSite=lax"],
+      ],
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockResponse));
+
+    const req = new NextRequest("http://frontend.example/api/auth/me", {
+      headers: { cookie: "session_token=abc123; csrf_token=xyz789" },
+    });
+    const res = await proxyToBackend(req, ["auth", "me"]);
+
+    expect(res.headers.get("x-debug-cookie-received")).toBe("true");
+    expect(res.headers.get("x-debug-cookie-names")).toBe("session_token,csrf_token");
+    expect(res.headers.get("x-debug-backend-status")).toBe("200");
+    expect(res.headers.get("x-debug-setcookie-count")).toBe("2");
+    expect(res.headers.get("x-debug-setcookie-names")).toBe("session_token,csrf_token");
+
+    // The debug headers specifically must only ever carry cookie NAMES,
+    // never values - unlike the real `set-cookie` header (which correctly
+    // does carry the real value; that's how cookies work), a debug header
+    // leaking a token value would defeat the entire point of it being safe
+    // to look at in devtools.
+    for (const [key, value] of res.headers) {
+      if (key.toLowerCase().startsWith("x-debug-")) {
+        expect(value).not.toContain("abc123");
+        expect(value).not.toContain("xyz789");
+      }
+    }
+  });
+
+  it("reports no cookie received (not a crash) when the request has none", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 401 })));
+
+    const req = new NextRequest("http://frontend.example/api/auth/me");
+    const res = await proxyToBackend(req, ["auth", "me"]);
+
+    expect(res.headers.get("x-debug-cookie-received")).toBe("false");
+    expect(res.headers.get("x-debug-cookie-names")).toBe("(none)");
+  });
+
+  it("returns a real JSON 502 (not an unhandled exception) if the backend is unreachable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new Error("ECONNREFUSED"))
+    );
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const req = new NextRequest("http://frontend.example/api/auth/me");
+    const res = await proxyToBackend(req, ["auth", "me"]);
+
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.error_type).toBe("PROXY_UPSTREAM_UNREACHABLE");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
 });

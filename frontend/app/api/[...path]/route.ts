@@ -5,6 +5,14 @@ import { proxyToBackend } from "@/lib/backend-proxy";
 // lib/backend-proxy.ts for why this replaced next.config.ts's rewrites().
 // One reusable handler for every route/method rather than a fragile
 // per-endpoint reimplementation.
+//
+// Explicit, not left to default inference: this must run on the Node.js
+// serverless runtime (not the Edge runtime) - Headers.getSetCookie(), used
+// in lib/backend-proxy.ts to forward multiple Set-Cookie headers
+// correctly, requires it. Also explicitly opted out of any static/ISR
+// caching - this proxies live, per-user, cookie-authenticated requests.
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 type RouteContext = { params: Promise<{ path: string[] }> };
 

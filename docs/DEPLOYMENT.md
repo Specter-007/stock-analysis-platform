@@ -148,6 +148,54 @@ Steps:
    watchlist, preferences, and paper trading all round-tripped correctly
    through `/api/*` on the frontend's own origin.
 
+### Temporary production diagnostics (remove once confirmed fixed)
+
+The Route Handler proxy (`frontend/lib/backend-proxy.ts`) currently adds
+safe, non-sensitive debug response headers to every `/api/*` response -
+added because the Route Handler replacement above was itself deployed
+once and *still* did not fix production auth, and local reproduction had
+already been exhausted as a diagnostic tool at that point. **Never** logs
+or exposes a token/cookie value - only booleans, counts, and cookie
+*names*:
+
+| Header | Meaning |
+|---|---|
+| `x-debug-cookie-received` | `true`/`false` - did this request arrive at the proxy with a `Cookie` header at all? |
+| `x-debug-cookie-names` | comma-separated cookie **names** the proxy received (never values) |
+| `x-debug-backend-status` | the raw HTTP status the backend itself returned |
+| `x-debug-setcookie-count` | how many `Set-Cookie` headers the backend response had |
+| `x-debug-setcookie-names` | comma-separated cookie **names** from those `Set-Cookie` headers |
+
+**How to use them**: open the real production site in a browser, open
+DevTools → Network tab, go through register → login → visit Watchlist,
+and for each of `/api/auth/login`, `/api/auth/me`, and `/api/watchlist`
+check the **Response Headers**:
+
+- `/api/auth/login`: expect `x-debug-setcookie-count: 2` and
+  `x-debug-setcookie-names: session_token,csrf_token`. If this is missing
+  or shows `0`, the backend→proxy leg is broken (check Render logs / the
+  backend is even receiving the request).
+- Then check the **Application/Storage tab → Cookies** for
+  `stock-analysis-platform-gamma.vercel.app` - are `session_token` and
+  `csrf_token` actually listed there after login? If the response header
+  above showed 2 cookies but they are NOT in browser storage, the browser
+  is rejecting them (check for a `Domain` mismatch or scheme issue in the
+  actual `Set-Cookie` string, visible in the same Network tab entry).
+- `/api/auth/me`: check `x-debug-cookie-received`. If `false`, the browser
+  has the cookie (per the previous step) but did not send it back on this
+  request - and `x-debug-cookie-names` will confirm exactly which
+  cookie(s), if any, did arrive.
+- If `x-debug-cookie-received` is `true` and `x-debug-backend-status` is
+  still `401`, the cookie reached the proxy and was forwarded, but the
+  *backend* rejected the session (expired/revoked/database issue) - a
+  different bug than a cookie-forwarding one.
+
+Report back which of these is observed and the exact header values (not
+screenshots with cookie values visible) - that pinpoints the failure
+stage precisely instead of guessing again. Remove this block and the
+`addDebugHeaders`/`x-debug-*` code in `lib/backend-proxy.ts` once the
+real cause is confirmed and fixed.
+
 ## Recommended architecture
 
 Nothing here is hardcoded into the app - it's provider-agnostic (a

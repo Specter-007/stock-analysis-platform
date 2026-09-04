@@ -51,15 +51,15 @@ import type {
 import type { Notification, NotificationListResponse, Preferences, SessionListResponse, User } from "@/types/auth";
 
 // `??` (not `||`): production deliberately sets this to an EMPTY string so
-// every request is same-origin (routed through the Next.js rewrite proxy
-// in next.config.ts, which forwards /api/* server-side to the real
-// backend) rather than a direct cross-site call to it - `||` would treat
-// that empty string as falsy and silently fall back to localhost. See
-// docs/DEPLOYMENT.md's "Frontend API URL" section for why: the frontend
-// and backend are on different registrable domains in production, and a
-// SameSite=Lax session/CSRF cookie is never sent on a genuine cross-site
-// fetch - only a same-origin request (this proxy) makes auth work at all
-// without weakening cookie security.
+// every request is same-origin (routed through the Next.js Route Handler
+// proxy at app/api/[...path]/route.ts, which forwards /api/* server-side
+// to the real backend) rather than a direct cross-site call to it - `||`
+// would treat that empty string as falsy and silently fall back to
+// localhost. See docs/DEPLOYMENT.md's "Frontend API URL" section for why:
+// the frontend and backend are on different registrable domains in
+// production, and a SameSite=Lax session/CSRF cookie is never sent on a
+// genuine cross-site fetch - only a same-origin request (this proxy)
+// makes auth work at all without weakening cookie security.
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 export class ApiError extends Error {
