@@ -144,7 +144,7 @@ def register_and_login(client, email: str, password: str = "abc12345", display_n
     cookies from the response for subsequent requests."""
     resp = client.post(
         "/api/auth/register",
-        json={"email": email, "password": password, "display_name": display_name},
+        json={"email": email, "password": password, "display_name": display_name, "accept_terms": True},
     )
     assert resp.status_code == 201, resp.text
     csrf_token = client.cookies.get("csrf_token")

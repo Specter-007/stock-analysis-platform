@@ -43,6 +43,8 @@ from app.experiments.models import (
 )
 from app.backtesting import metrics as backtest_metrics
 from app.market.regime_performance import compute_regime_performance
+from app.models_db.notification import TYPE_EXPERIMENT_COMPLETED, TYPE_EXPERIMENT_FAILED
+from app.notifications import service as notifications_service
 from app.paper_trading import forward_validation
 from app.paper_trading import service as paper_trading_service
 from app.services.exceptions import InsufficientHistoryError
@@ -388,6 +390,12 @@ def run_experiment(
         experiment.error = f"Backtest failed: {exc}"
         experiment.updated_at = _now_iso()
         store.save_experiment(db, user_id, experiment)
+        notifications_service.create_notification(
+            db, user_id, TYPE_EXPERIMENT_FAILED,
+            title=f"Experiment failed: {experiment.name}",
+            message=f"Backtest failed: {exc}",
+            target_route=f"/experiments/{experiment.id}",
+        )
         return experiment
 
     requested_and_outcomes: list[tuple[bool, ValidationOutcome]] = []
@@ -439,6 +447,12 @@ def run_experiment(
     experiment.status = STATUS_VALIDATED if all_requested_succeeded else STATUS_COMPLETED
     experiment.updated_at = _now_iso()
     store.save_experiment(db, user_id, experiment)
+    notifications_service.create_notification(
+        db, user_id, TYPE_EXPERIMENT_COMPLETED,
+        title=f"Experiment finished: {experiment.name}",
+        message=f"Status: {experiment.status}.",
+        target_route=f"/experiments/{experiment.id}",
+    )
     return experiment
 
 

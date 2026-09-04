@@ -18,7 +18,7 @@ def _csrf_headers(client):
 def test_register_creates_account_and_session_cookies(api_client):
     resp = api_client.post(
         "/api/auth/register",
-        json={"email": "alice@example.com", "password": "abc12345", "display_name": "Alice"},
+        json={"email": "alice@example.com", "password": "abc12345", "display_name": "Alice", "accept_terms": True},
     )
     assert resp.status_code == 201
     body = resp.json()
@@ -32,7 +32,7 @@ def test_register_duplicate_email_returns_409(api_client):
     register_and_login(api_client, "dup@example.com")
     resp = api_client.post(
         "/api/auth/register",
-        json={"email": "dup@example.com", "password": "abc12345", "display_name": "Someone Else"},
+        json={"email": "dup@example.com", "password": "abc12345", "display_name": "Someone Else", "accept_terms": True},
     )
     assert resp.status_code == 409
     assert resp.json()["error_type"] == "EMAIL_ALREADY_REGISTERED"
@@ -41,7 +41,7 @@ def test_register_duplicate_email_returns_409(api_client):
 def test_register_rejects_weak_password(api_client):
     resp = api_client.post(
         "/api/auth/register",
-        json={"email": "weak@example.com", "password": "short", "display_name": "Weak"},
+        json={"email": "weak@example.com", "password": "short", "display_name": "Weak", "accept_terms": True},
     )
     assert resp.status_code == 422
 
@@ -49,7 +49,7 @@ def test_register_rejects_weak_password(api_client):
 def test_register_rejects_invalid_email(api_client):
     resp = api_client.post(
         "/api/auth/register",
-        json={"email": "not-an-email", "password": "abc12345", "display_name": "X"},
+        json={"email": "not-an-email", "password": "abc12345", "display_name": "X", "accept_terms": True},
     )
     assert resp.status_code == 422
 

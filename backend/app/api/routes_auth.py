@@ -57,7 +57,10 @@ def _issue_login_cookies(response: Response, db: Session, user: User, request: R
 @router.post("/register", response_model=UserResponse, status_code=201)
 @limiter.limit(RATE_LIMIT_AUTH)
 def register(request: Request, body: RegisterRequest, response: Response, db: Session = Depends(get_db)):
-    user = auth_service.register(db, email=body.email, password=body.password, display_name=body.display_name)
+    user = auth_service.register(
+        db, email=body.email, password=body.password, display_name=body.display_name,
+        marketing_consent=body.marketing_consent,
+    )
     auth_service.request_email_verification(db, user)
     _issue_login_cookies(response, db, user, request)
     return _user_response(user)

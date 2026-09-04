@@ -28,7 +28,10 @@ def _ensure_authenticated() -> None:
     """
     resp = client.post(
         "/api/auth/register",
-        json={"email": _TEST_USER_EMAIL, "password": _TEST_USER_PASSWORD, "display_name": "Integration Test"},
+        json={
+            "email": _TEST_USER_EMAIL, "password": _TEST_USER_PASSWORD, "display_name": "Integration Test",
+            "accept_terms": True,
+        },
     )
     if resp.status_code == 409:
         resp = client.post("/api/auth/login", json={"email": _TEST_USER_EMAIL, "password": _TEST_USER_PASSWORD})

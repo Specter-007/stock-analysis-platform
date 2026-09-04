@@ -25,6 +25,12 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=_PASSWORD_MAX_LENGTH)
     display_name: str = Field(min_length=1, max_length=120)
+    # Required, no default: registering without ticking this must fail
+    # validation rather than silently accepting on the user's behalf.
+    accept_terms: bool
+    # Explicitly separate from accept_terms - accepting the Terms of
+    # Service must never imply marketing consent (see docs/AUTHENTICATION.md).
+    marketing_consent: bool = False
 
     @field_validator("password")
     @classmethod
@@ -37,6 +43,13 @@ class RegisterRequest(BaseModel):
         v = v.strip()
         if not v:
             raise ValueError("Display name cannot be empty.")
+        return v
+
+    @field_validator("accept_terms")
+    @classmethod
+    def _must_accept_terms(cls, v: bool) -> bool:
+        if not v:
+            raise ValueError("You must accept the Terms of Service and Privacy Policy to register.")
         return v
 
 

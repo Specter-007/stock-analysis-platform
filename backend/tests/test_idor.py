@@ -23,7 +23,10 @@ def _csrf_headers(client):
 
 
 def _register(client, email, password="abc12345", display_name="Test"):
-    resp = client.post("/api/auth/register", json={"email": email, "password": password, "display_name": display_name})
+    resp = client.post(
+        "/api/auth/register",
+        json={"email": email, "password": password, "display_name": display_name, "accept_terms": True},
+    )
     assert resp.status_code == 201, resp.text
     return resp.json()
 

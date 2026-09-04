@@ -23,6 +23,8 @@ from app.config import (
 )
 from app.indicators.compute import compute_indicator_frame, safe_float
 from app.market.regime import classify_market_regime
+from app.models_db.notification import TYPE_PAPER_PORTFOLIO_EVENT
+from app.notifications import service as notifications_service
 from app.paper_trading.sizing import PositionSizingError, SizingRequest, calculate_shares
 from app.paper_trading.store import list_portfolio_ids, load_portfolio, reset_portfolio, save_portfolio
 from app.services import market_data
@@ -431,6 +433,12 @@ def _apply_pending_exits(db: Session, user_id: str, portfolio_id: str) -> None:
         if exit_reason:
             _close_position(state, ticker, pos["shares"], price, exit_reason)
             changed = True
+            notifications_service.create_notification(
+                db, user_id, TYPE_PAPER_PORTFOLIO_EVENT,
+                title=f"{exit_reason.replace('_', ' ').title()} triggered: {ticker}",
+                message=f"Portfolio '{portfolio_id}' automatically closed {ticker} at ${price:,.2f} ({exit_reason}).",
+                target_route=f"/paper-trading?portfolio={portfolio_id}",
+            )
 
     if changed:
         save_portfolio(db, user_id, portfolio_id, state)

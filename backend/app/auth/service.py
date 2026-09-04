@@ -59,7 +59,9 @@ def get_user_by_id(db: Session, user_id: str) -> User | None:
     return db.get(User, user_id)
 
 
-def register(db: Session, *, email: str, password: str, display_name: str) -> User:
+def register(
+    db: Session, *, email: str, password: str, display_name: str, marketing_consent: bool = False
+) -> User:
     email = _normalize_email(email)
     if get_user_by_email(db, email) is not None:
         raise EmailAlreadyRegisteredError("An account with this email already exists.")
@@ -67,7 +69,15 @@ def register(db: Session, *, email: str, password: str, display_name: str) -> Us
     user = User(email=email, password_hash=hash_password(password), display_name=display_name)
     db.add(user)
     db.flush()  # populate user.id before creating the dependent row
-    db.add(UserPreferences(user_id=user.id))
+    now = _utcnow()
+    db.add(
+        UserPreferences(
+            user_id=user.id,
+            marketing_consent=marketing_consent,
+            terms_accepted_at=now,
+            privacy_accepted_at=now,
+        )
+    )
     db.commit()
     db.refresh(user)
     logger.info("New account registered: user_id=%s", user.id)
