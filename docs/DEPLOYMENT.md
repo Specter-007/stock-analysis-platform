@@ -62,28 +62,62 @@ data. Running `python scripts/production_preflight.py` against this
 configuration correctly reports `[FAIL] DATABASE_URL` - that is the
 script working as intended, not a bug to silence.
 
-## Frontend API URL (connecting Vercel to Render)
+## Frontend API URL - same-origin proxy (connecting Vercel to Render)
 
-The frontend reads its backend URL from exactly one place:
-`NEXT_PUBLIC_API_BASE_URL` (`frontend/lib/api.ts`), defaulting to
-`http://localhost:8000` when unset. This default is why the deployed
-Vercel frontend currently shows "Could not reach the analysis server" -
-the *browser visiting the Vercel site* tries to call `localhost:8000`,
-meaning the visitor's own machine, not any real server.
+**Production does NOT call the Render backend directly from the browser.**
+An earlier version of this document recommended pointing
+`NEXT_PUBLIC_API_BASE_URL` straight at the Render URL - that architecture
+has a real, confirmed bug: the frontend (`*.vercel.app`) and backend
+(`*.onrender.com`) are different registrable domains, so a direct
+cross-site call is genuinely cross-site, and the session/CSRF cookies
+(`SameSite=Lax` - see `app/auth/cookies.py`) are **never attached** to a
+cross-site `fetch`, regardless of `credentials: "include"`. Observed
+symptom: `POST /api/auth/login` → `200`, immediately followed by
+`GET /api/auth/me` → `401`, because the browser never sent the session
+cookie back on the second request.
 
-Once the Render backend is deployed and its URL is known:
+**Fix: a same-origin API proxy**, using Next.js's own `rewrites()`
+(`frontend/next.config.ts`). The browser only ever talks to the frontend's
+own origin (`/api/*`); Vercel forwards that server-side to the real
+Render backend. From the browser's point of view every request - login,
+`/me`, watchlist, everything - is same-origin, so `SameSite=Lax`,
+`Secure`, and `HttpOnly` all keep working exactly as configured. **No
+cookie or CORS security setting was loosened to fix this** - the backend's
+`app/auth/cookies.py` is unchanged, and neither is its CORS/CSRF
+configuration.
 
-1. In the Vercel dashboard for this project: **Settings** → **Environment
-   Variables** → add `NEXT_PUBLIC_API_BASE_URL` = the real Render URL
-   (e.g. `https://stock-analyst-backend-XXXX.onrender.com`), scoped to
-   Production (and Preview, if desired).
+Required Vercel environment variables for this to work:
+
+| Variable | Value | Scope |
+|---|---|---|
+| `NEXT_PUBLIC_API_BASE_URL` | **empty string** (literally blank - not unset, not `http://localhost:8000`) | Production |
+| `BACKEND_URL` | the real Render URL, e.g. `https://stock-analyst-backend.onrender.com` (no trailing slash) | Production (server-only - never exposed to the browser, deliberately not `NEXT_PUBLIC_*`) |
+
+Setting `NEXT_PUBLIC_API_BASE_URL` to an empty string (not leaving it
+unset) matters: `frontend/lib/api.ts` uses `??`, not `||`, specifically so
+an intentional empty string is respected as "same-origin" rather than
+being treated as falsy and silently falling back to `localhost:8000` -
+see the regression tests in `frontend/lib/api.test.ts`.
+
+Steps:
+
+1. Vercel dashboard → **Settings** → **Environment Variables** → add both
+   variables above, scoped to Production.
 2. **Trigger a new deployment** - Next.js bakes `NEXT_PUBLIC_*` variables
-   into the build at build time, not read at request time, so an existing
-   deployment will not pick up the change until it's rebuilt (**Deployments**
-   → **⋯** → **Redeploy**, or push a new commit).
-3. Local development is unaffected - `frontend/.env.local` (gitignored)
-   keeps pointing at `http://localhost:8000`, so `npm run dev` continues
-   to work against a locally-running backend exactly as before.
+   into the build at build time; `BACKEND_URL` is read at request time by
+   Vercel's rewrite layer, but redeploying after any env var change is the
+   safe default regardless (**Deployments** → **⋯** → **Redeploy**, or
+   push a new commit).
+3. Local development is unaffected: `frontend/.env.local` (gitignored)
+   keeps `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000` set, so
+   `npm run dev` continues to call a locally-running backend directly -
+   `localhost:3000` and `localhost:8000` differ only by port, which is
+   same-site for cookie purposes, so the proxy was never needed there.
+   Verified locally end-to-end (production build + `next start`, a real
+   local backend, and the proxy wired via `BACKEND_URL`) before this was
+   documented: register, login, `/me`, logout, CSRF-protected requests,
+   watchlist, preferences, and paper trading all round-tripped correctly
+   through `/api/*` on the frontend's own origin.
 
 ## Recommended architecture
 
@@ -211,17 +245,18 @@ while the browser had the page open via `localhost`, which silently
 dropped every cookie) - see [DEVELOPMENT.md](DEVELOPMENT.md). Plan your
 production domain names with this constraint in mind.
 
-**This applies directly to the current Vercel + Render deployment**:
-`stock-analysis-platform-gamma.vercel.app` and `*.onrender.com` are
-different registrable domains, so this is a genuinely cross-site pairing.
-The public stock-analysis endpoints don't need cookies at all, so this
-does not block them - but registration/login/session cookies **will not
-work** between these two specific hosts as configured. Fixing that
-properly (a shared registrable domain via custom DNS, e.g.
-`app.yourdomain.com` + `api.yourdomain.com`) is a real architecture
-decision for whenever authentication is brought online here, not
-something to work around by loosening `SameSite` or CSRF - that would be
-weakening a security control to paper over a domain-naming choice.
+**This applied directly to, and was confirmed as a real bug in, the
+Vercel + Render deployment**: `stock-analysis-platform-gamma.vercel.app`
+and `*.onrender.com` are different registrable domains, so a direct
+browser-to-backend call is genuinely cross-site, and session/CSRF cookies
+were never sent back on the follow-up request (login succeeded, `/me`
+returned 401). **Resolved** via the same-origin API proxy described above
+("Frontend API URL - same-origin proxy") rather than by loosening
+`SameSite` or CSRF - the browser now only ever talks to its own origin,
+so this constraint no longer applies to the deployed app as configured. A
+shared custom domain (`app.yourdomain.com` + `api.yourdomain.com`) remains
+a reasonable alternative if the proxy hop's extra latency ever matters,
+but is not required for correct or secure behavior.
 
 ## Reverse proxy / HTTPS
 
