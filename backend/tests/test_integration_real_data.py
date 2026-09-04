@@ -370,3 +370,89 @@ def test_real_model_version_comparison():
     body = resp.json()
     assert len(body["backtest_comparison"]) == 2
     assert {r["model_version"] for r in body["backtest_comparison"]} == {"1.0", "1.1"}
+
+
+# ---------------------------------------------------------------------- V5
+
+
+def test_real_cost_stress_test():
+    resp = client.post(
+        "/api/backtest/cost-stress",
+        json={"ticker": "AAPL", "start_date": "2022-01-01", "end_date": "2024-01-01"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["commission_scenarios"]) == 4
+    assert len(body["slippage_scenarios"]) == 5
+    # Trade decisions never depend on cost, so every scenario shares the same trade count.
+    trade_counts = {s["number_of_trades"] for s in body["commission_scenarios"]}
+    assert len(trade_counts) == 1
+
+
+def test_real_monte_carlo_extended_statistics():
+    resp = client.post(
+        "/api/backtest/monte-carlo",
+        json={"ticker": "AAPL", "start_date": "2022-01-01", "end_date": "2024-01-01", "simulations": 200, "seed": 1},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["seed"] == 1
+    assert body["resampling_method"] in ("iid_bootstrap", "block_bootstrap", "unavailable")
+    if body["resampling_basis"] != "unavailable":
+        assert 0 <= body["probability_of_loss_percent"] <= 100
+        assert 0 <= body["probability_of_exceeding_drawdown_threshold_percent"] <= 100
+
+
+def test_real_model_drift():
+    resp = client.post("/api/model/drift", json={"ticker": "AAPL", "benchmark": "SPY"})
+    assert resp.status_code == 200
+    body = resp.json()
+    if not body["insufficient_data"]:
+        for dim in ("signal_distribution", "factor_distribution", "regime_distribution"):
+            assert body[dim] is not None
+            total_historical = sum(body[dim]["historical_percent"].values())
+            assert total_historical == pytest.approx(100.0, abs=1.0)
+
+
+def test_real_experiment_full_lifecycle():
+    create_resp = client.post(
+        "/api/experiments",
+        json={
+            "name": "Integration Test Experiment",
+            "config": {
+                "tickers": ["AAPL"], "benchmark": "SPY",
+                "start_date": "2022-01-01", "end_date": "2024-01-01",
+                "initial_capital": 10000, "run_out_of_sample": True,
+            },
+        },
+    )
+    assert create_resp.status_code == 200
+    experiment_id = create_resp.json()["id"]
+    fingerprint = create_resp.json()["fingerprint"]
+
+    try:
+        run_resp = client.post(f"/api/experiments/{experiment_id}/run")
+        assert run_resp.status_code == 200
+        ran = run_resp.json()
+        assert ran["status"] in ("VALIDATED", "COMPLETED")
+        assert ran["results"]["backtest"]["completed"] is True
+        assert len(ran["results"]["backtest"]["result"]["strategy_curve"]) > 0
+
+        reopened = client.get(f"/api/experiments/{experiment_id}").json()
+        assert reopened["fingerprint"] == fingerprint  # unchanged by running
+
+        dup_resp = client.post(f"/api/experiments/{experiment_id}/duplicate", json={})
+        assert dup_resp.status_code == 200
+        assert dup_resp.json()["fingerprint"] == fingerprint
+        client.delete(f"/api/experiments/{dup_resp.json()['id']}")
+
+        list_resp = client.get("/api/experiments")
+        assert experiment_id in [row["experiment"]["id"] for row in list_resp.json()["experiments"]]
+    finally:
+        client.delete(f"/api/experiments/{experiment_id}")
+
+
+def test_real_paper_portfolios_listing():
+    resp = client.get("/api/paper-portfolios")
+    assert resp.status_code == 200
+    assert isinstance(resp.json()["portfolios"], list)

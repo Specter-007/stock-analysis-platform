@@ -1,22 +1,33 @@
 # Stock Analyst
 
-A quantitative stock research, **validation**, and paper-trading platform. It retrieves real
-market data from Yahoo Finance (via `yfinance`) and runs it through a transparent, deterministic,
-versioned rules-based scoring engine to classify each ticker as **Strong Buy / Buy / Hold / Sell /
-Strong Sell** — with every contributing factor, its category weight, its historical track record,
-and what would invalidate it all shown, not hidden behind a black box.
+A quantitative stock research, **validation**, and paper-trading platform — organized as a
+**research lab**, not just a signal viewer. It retrieves real market data from Yahoo Finance (via
+`yfinance`) and runs it through a transparent, deterministic, versioned rules-based scoring engine
+to classify each ticker as **Strong Buy / Buy / Hold / Sell / Strong Sell** — with every
+contributing factor, its category weight, its historical track record, and what would invalidate
+it all shown, not hidden behind a black box.
 
 Beyond the core signal, the platform adds: signal history and stability tracking, market-regime
 detection (and regime-conditioned performance), relative-strength and sector comparison, optional
 fundamental scoring, a full quantitative Model Evaluation suite (CAGR, Sortino, Calmar, beta/alpha,
 exposure, turnover, and more), out-of-sample validation, parameter sensitivity/robustness analysis
 (including indicator-period sweeps and a 2D heatmap), walk-forward and Monte Carlo backtesting
-checks, multi-ticker portfolio backtesting with configurable allocation/rebalancing/constraints,
-side-by-side stock comparison, a five-dimension Model Scorecard, a watchlist, and an advanced
-simulation-only paper-trading engine with position sizing, stop-loss/take-profit/trailing-stop
-controls, persistent equity-curve history, and a dedicated **Forward Validation** engine that tracks
-how the model actually performs as real market data arrives — conceptually and technically distinct
-from backtesting, which replays the past.
+checks (with CAGR/loss/drawdown-threshold probabilities and a block-bootstrap fallback for
+autocorrelated daily returns), transaction-cost and slippage stress testing, multi-ticker portfolio
+backtesting with configurable allocation/rebalancing/constraints, side-by-side stock comparison, a
+five-dimension Model Scorecard, model drift monitoring (signal/factor/regime distribution shifts),
+a watchlist, and an advanced simulation-only paper-trading engine with position sizing, stop-loss/
+take-profit/trailing-stop controls, persistent equity-curve history, multi-simulation support, and
+a dedicated **Forward Validation** engine that tracks how the model actually performs as real market
+data arrives — conceptually and technically distinct from backtesting, which replays the past.
+
+Tying all of this together is the **Experiment Lab**: every research run is a reproducible
+*experiment* that stores the configuration that produced a result (not just the numbers), gets a
+deterministic reproducibility fingerprint, persists across restarts, can be duplicated, compared
+against other experiments (with explicit warnings when they aren't directly comparable), linked to
+a forward paper simulation, and browsed in a **Research History** that discloses when the same
+historical data has been searched over and over — a research-integrity signal, not an automatic
+statistical correction.
 
 > **Not financial advice.** This is a research and educational tool. It does not guarantee returns,
 > does not predict the future, and is not a substitute for professional financial advice. See
@@ -50,21 +61,25 @@ from backtesting, which replays the past.
 22. [Parameter Sensitivity & Robustness](#parameter-sensitivity--robustness)
 23. [Walk-Forward Analysis](#walk-forward-analysis)
 24. [Monte Carlo Robustness](#monte-carlo-robustness)
-25. [Data Quality Layer](#data-quality-layer)
-26. [Watchlist](#watchlist)
-27. [Paper Trading](#paper-trading)
-28. [Forward Validation (Paper Trading ≠ Backtesting)](#forward-validation-paper-trading--backtesting)
-29. [Portfolio Backtesting](#portfolio-backtesting)
-30. [Stock Comparison](#stock-comparison)
-31. [Model Scorecard & Model-vs-Model Comparison](#model-scorecard--model-vs-model-comparison)
-32. [No-Look-Ahead-Bias Guarantee](#no-look-ahead-bias-guarantee)
-33. [Data Freshness & Status Labels](#data-freshness--status-labels)
-34. [yfinance / Yahoo Finance Limitations](#yfinance--yahoo-finance-limitations)
-35. [Financial Disclaimer](#financial-disclaimer)
-36. [Testing](#testing)
-37. [Deployment Considerations](#deployment-considerations)
-38. [GitHub Setup](#github-setup)
-39. [Known Limitations & Remaining Work](#known-limitations--remaining-work)
+25. [Transaction-Cost & Slippage Stress Testing](#transaction-cost--slippage-stress-testing)
+26. [Data Quality Layer](#data-quality-layer)
+27. [Watchlist](#watchlist)
+28. [Paper Trading](#paper-trading)
+29. [Forward Validation (Paper Trading ≠ Backtesting)](#forward-validation-paper-trading--backtesting)
+30. [Multi-Simulation](#multi-simulation)
+31. [Portfolio Backtesting](#portfolio-backtesting)
+32. [Stock Comparison](#stock-comparison)
+33. [Model Scorecard & Model-vs-Model Comparison](#model-scorecard--model-vs-model-comparison)
+34. [Model Drift Monitoring](#model-drift-monitoring)
+35. [Experiment Lab & Research History](#experiment-lab--research-history)
+36. [No-Look-Ahead-Bias Guarantee](#no-look-ahead-bias-guarantee)
+37. [Data Freshness & Status Labels](#data-freshness--status-labels)
+38. [yfinance / Yahoo Finance Limitations](#yfinance--yahoo-finance-limitations)
+39. [Financial Disclaimer](#financial-disclaimer)
+40. [Testing](#testing)
+41. [Deployment Considerations](#deployment-considerations)
+42. [GitHub Setup](#github-setup)
+43. [Known Limitations & Remaining Work](#known-limitations--remaining-work)
 
 ---
 
@@ -256,7 +271,8 @@ All responses include a `meta` object: `data_source`, `data_status`, `retrieved_
 | GET | `/api/stock/{ticker}/sector` | Sector peer comparison (curated peer list, live-fetched returns) |
 | POST | `/api/backtest` | Runs the backtest engine (see request body below); response includes `advanced_metrics` (see [Model Evaluation Metrics](#model-evaluation-metrics)) |
 | POST | `/api/backtest/walk-forward` | Sequential train/test-window robustness analysis |
-| POST | `/api/backtest/monte-carlo` | Bootstrap-resampling robustness simulation over a backtest |
+| POST | `/api/backtest/monte-carlo` | Bootstrap-resampling robustness simulation over a backtest, with CAGR/loss/drawdown-threshold probabilities |
+| POST | `/api/backtest/cost-stress` | Commission-scaling + slippage-sweep friction stress test (see [Transaction-Cost & Slippage Stress Testing](#transaction-cost--slippage-stress-testing)) |
 | POST | `/api/backtest/sensitivity` | Threshold + indicator-period perturbation and robustness classification (see [Parameter Sensitivity & Robustness](#parameter-sensitivity--robustness)) |
 | POST | `/api/backtest/sensitivity/heatmap` | 2D grid over two sensitivity parameters at once |
 | POST | `/api/backtest/out-of-sample` | In-sample / validation / out-of-sample three-period split |
@@ -270,6 +286,20 @@ All responses include a `meta` object: `data_source`, `data_status`, `retrieved_
 | POST | `/api/model/regime-performance` | Regroups a backtest's realized returns by benchmark regime (see [Regime-Conditioned Performance](#regime-conditioned-performance)) |
 | POST | `/api/model/scorecard` | Five-dimension model scorecard (see [Model Scorecard & Model-vs-Model Comparison](#model-scorecard--model-vs-model-comparison)) |
 | POST | `/api/model/compare-versions` | v1.0 vs v1.1 backtest + forward comparison |
+| POST | `/api/model/drift` | Signal/factor/regime distribution drift vs. historical baseline (see [Model Drift Monitoring](#model-drift-monitoring)) |
+| POST | `/api/experiments` | Create an experiment (see [Experiment Lab & Research History](#experiment-lab--research-history)) |
+| GET | `/api/experiments?include_archived=false` | List experiments, with research-history data-mining group counts |
+| GET | `/api/experiments/{id}` | Get one experiment |
+| DELETE | `/api/experiments/{id}` | Delete an experiment |
+| POST | `/api/experiments/{id}/run` | Run (or re-run) an experiment against fresh data |
+| POST | `/api/experiments/{id}/duplicate` | Duplicate (same fingerprint, new ID) |
+| POST | `/api/experiments/{id}/archive` | Archive/unarchive |
+| PATCH | `/api/experiments/{id}/notes` | Edit notes/tags (never affects the fingerprint) |
+| POST | `/api/experiments/{id}/forward-simulation` | Start a forward paper simulation (single-ticker experiments only) |
+| GET | `/api/experiments/{id}/forward-vs-historical` | Forward observations vs. the experiment's own historical expectation |
+| GET | `/api/experiments/{id}/export` | Download the experiment's full configuration + results as JSON |
+| POST | `/api/experiments/compare` | Compare 2-5 experiments, with mismatched-period/version/universe warnings |
+| GET | `/api/paper-portfolios` | Every paper-trading simulation that exists (see [Multi-Simulation](#multi-simulation)) |
 | GET | `/api/watchlist?watchlist_id=default` | Enriched watchlist (real quote + fresh signal per ticker) |
 | POST | `/api/watchlist` | Add a ticker (`watchlist_id`, `ticker`) |
 | DELETE | `/api/watchlist/{ticker}?watchlist_id=default` | Remove a ticker |
@@ -281,7 +311,7 @@ All responses include a `meta` object: `data_source`, `data_status`, `retrieved_
 | GET | `/api/paper-portfolio/risk?portfolio_id=default` | Exposure/concentration/sector risk dashboard |
 | GET | `/api/paper-portfolio/history?portfolio_id=default` | Persistent, append-only daily equity snapshot history (see [Paper Trading](#paper-trading)) |
 | GET | `/api/paper-portfolio/forward-validation?portfolio_id=default` | Forward paper-trading observation summary (see [Forward Validation](#forward-validation-paper-trading--backtesting)) |
-| GET | `/api/health` | Liveness check |
+| GET | `/api/health` | Liveness + per-store persistence check (never calls Yahoo Finance) |
 
 **POST `/api/backtest` body:**
 
@@ -575,12 +605,44 @@ for any ticker with long history; this is covered by a regression test
 
 ## Monte Carlo Robustness
 
-`POST /api/backtest/monte-carlo` runs one backtest, then bootstrap-resamples (with replacement)
-its own historical per-trade returns (or daily returns, if there were fewer than 10 trades) to
-build many simulated equity paths, reporting the 5th/median/95th-percentile final return and the
-median/worst simulated maximum drawdown. This is a stress/robustness check on the historical sample
-actually observed — it assumes the future resembles that sample's distribution and is explicitly
-**not** a forecast. Pass a `seed` for reproducible output.
+`POST /api/backtest/monte-carlo` runs one backtest, then bootstrap-resamples its own historical
+returns to build many simulated equity paths, reporting the 5th/median/95th-percentile final
+return, final equity, and CAGR, the median/worst simulated maximum drawdown, the **probability of
+ending below initial capital**, and the **probability of exceeding a configurable drawdown
+threshold** (default -20%). This is a stress/robustness check on the historical sample actually
+observed — it assumes the future resembles that sample's distribution and is explicitly **not** a
+forecast. Pass a `seed` for fully reproducible output (the same sample + seed + simulation count
+always produces the same result — `numpy.random.default_rng` is a deterministic PRNG given a fixed
+seed); both `seed` and `resampling_method` are echoed back in the response for full disclosure.
+
+**Resampling methodology (V5):** trade-level returns are resampled as independent draws (an IID
+bootstrap) — each closed trade is a reasonably distinct economic event, so treating them as
+exchangeable is a defensible simplification. Daily returns, used only as a fallback when there are
+too few discrete trades (< 10), are **not** resampled independently: a long/flat strategy's
+day-to-day returns are autocorrelated (a position persists across many consecutive days), so an IID
+daily bootstrap would understate real path risk by discarding that structure. The daily-returns
+fallback therefore uses a **block bootstrap** (contiguous 5-day chunks resampled with replacement
+and concatenated), preserving local autocorrelation within each block while still bootstrapping the
+overall sequence — this distinction, and which one was actually used, is documented directly in the
+response rather than left implicit.
+
+## Transaction-Cost & Slippage Stress Testing
+
+`POST /api/backtest/cost-stress` answers "does this edge survive higher trading friction, or is it
+razor-thin?" — a question distinct from Monte Carlo's "how sensitive is this result to the specific
+sequence of trades that happened to occur?" Commission is scaled at `BASE`/`MODERATE`/`HIGH`/
+`EXTREME` (1×/2×/5×/10× the caller's base commission, slippage held constant), and slippage is
+swept independently across fixed absolute levels (0/5/10/25/50 bps, commission held constant) —
+kept as two separate dimensions because a fixed brokerage fee and a market-impact/price-movement
+cost are economically different frictions, and blending them into one "cost" dial would obscure
+which one actually drives any survivability difference. `gross_return` (zero commission, zero
+slippage) is computed **once** and reused as the exact baseline for every scenario's
+`total_cost_percent` — never estimated — because trade decisions never depend on cost_rate (the
+signal engine has no knowledge of costs), so every scenario executes an identical sequence of
+trades; only the price haircut applied to each fill differs. Surviving at higher cost multipliers is
+evidence the edge isn't razor-thin relative to trading frictions — it is **not**, by itself, a
+general robustness claim (see [Parameter Sensitivity & Robustness](#parameter-sensitivity--robustness)
+for that).
 
 ## Data Quality Layer
 
@@ -664,6 +726,18 @@ under 20 observed trading days rather than presenting an early number as conclus
 page shows an explicit **"NO NEW MARKET DATA to chart yet"** state instead of any simulated or
 interpolated ticking when there aren't yet enough real observations to draw a line.
 
+## Multi-Simulation
+
+`GET /api/paper-portfolios` enumerates every paper-trading simulation that exists via a directory
+listing of `backend/data/paper_trading/` (no separate index to drift out of sync with the files it
+describes), returning each one's starting/current value, return, positions, and trade count. The
+frontend's Paper Trading page shows these as selectable cards (only when more than one exists) and
+drives the page's active portfolio off a `?portfolio=` URL query parameter — switching never
+requires a full page reload. This is what makes running several forward paper simulations side by
+side (e.g. Quant v1.0 vs v1.1 on the same ticker) practical without any new persistence: the
+existing `portfolio_id` mechanism already supported multiple independent, independently-tracked
+simulations; this just makes them discoverable and comparable in the UI.
+
 ## Portfolio Backtesting
 
 `POST /api/backtest/portfolio` extends backtesting from one ticker to a **basket of 2-20 tickers**,
@@ -739,6 +813,90 @@ explicitly disclaims any claim of statistical superiority: forward sample sizes 
 enough that a few points of return difference between versions is ordinary noise, not evidence of a
 better model.
 
+## Model Drift Monitoring
+
+`POST /api/model/drift` compares a ticker's most recent 60 trading sessions against the historical
+sessions that precede them (drawn from the same signal-history computation the Model Performance
+page already uses — every point is a real, causally-computed signal, never estimated) across three
+dimensions: **signal distribution** (BUY/HOLD/SELL, grouping `STRONG_*` into their base class),
+**factor contribution mix** (Trend/Momentum/Volume/Volatility, reusing each historical point's own
+`category_breakdown`), and **market-regime distribution** (reusing `classify_market_regime`
+day-by-day). A bucket is flagged only when its share moved by at least 15 percentage points between
+the two windows — a documented, transparent **threshold heuristic, explicitly not a formal
+hypothesis test**: daily signals and regimes are highly autocorrelated (a signal or regime typically
+persists across many consecutive days), so a classical test assuming independent observations (e.g.
+a chi-square goodness-of-fit test) would systematically overstate its own significance here. A plain
+disclosed threshold is more statistically honest than a p-value that doesn't mean what a reader
+would assume. Detecting drift never changes model weights, thresholds, or version on its own — it
+only reports what changed, for the user to decide what to research next.
+
+## Experiment Lab & Research History
+
+The central V5 concept: an **Experiment** stores the *configuration* that produced a result, not
+just the final numbers, so a past run can be reopened, reproduced, or compared long after today's
+model defaults, thresholds, or cost assumptions have changed.
+
+**Lifecycle:** `DRAFT → CONFIGURED → RUNNING → COMPLETED → VALIDATED → PAPER_FORWARD_TEST` (or
+`FAILED`). `VALIDATED` means every validation procedure the config actually *requested*
+(out-of-sample, walk-forward, sensitivity, Monte Carlo, regime analysis, cost stress) completed
+without error — an experiment that only ran a backtest is never called "validated" merely because
+the backtest succeeded. Requesting a validation procedure on a multi-ticker portfolio experiment
+(none of the six currently operate on the portfolio engine) records it as requested-but-not-
+completed with an explicit "not yet implemented for portfolios" reason, rather than silently
+skipping it.
+
+**Reproducibility fingerprint:** a SHA-256 hash over the experiment's canonical configuration
+(model version, ticker universe with order normalized, benchmark, dates, capital, costs,
+allocation/rebalancing, constraints, and the specific validation parameters requested), formatted
+as `XXXX-XXXX-XXXX-XXXX`. Two configurations that are identical in every field that determines what
+the result *means* always produce the same fingerprint, regardless of when they were run; changing
+any one of them always changes it. Notes, tags, and results are deliberately excluded from the hash
+— they describe the experiment but aren't part of what makes it reproducible, so editing them later
+never changes the fingerprint. `POST /api/experiments/{id}/duplicate` creates a new experiment with
+a fresh ID but the identical fingerprint, for verifying reproducibility or tweaking-and-rerunning.
+
+**Persistence:** one JSON file per experiment (`backend/data/experiments/`, gitignored), written
+atomically (temp file + `os.replace`) so a crash mid-write can never leave a corrupted file — a
+reader always sees either the complete old version or the complete new one. A `RUNNING` status is
+persisted immediately before the heavy computation starts, so a crash mid-run is visible on reload
+rather than silently stuck at `DRAFT`.
+
+**Orchestration:** running an experiment calls the exact same engines every standalone page already
+calls (`run_backtest`/`run_portfolio_backtest`, `run_out_of_sample_validation`, `run_walk_forward`,
+`run_sensitivity_analysis`, `run_monte_carlo`, `compute_regime_performance`,
+`run_cost_stress_test`) — no new backtesting or scoring logic. The stored backtest result includes
+the full equity/buy-hold/benchmark/drawdown curves (not just scalar metrics), so the experiment's
+own Performance tab can render real charts.
+
+**Forward-simulation linkage:** `POST /api/experiments/{id}/forward-simulation` creates a fresh
+paper-trading portfolio (using the experiment's own ID as the `portfolio_id`) inheriting the
+experiment's ticker, capital, and model version — but only for **single-ticker** experiments.
+Multi-ticker portfolio experiments cannot start a forward simulation yet: there is no portfolio-
+level *forward* paper-trading engine (only the historical portfolio-backtest engine and the
+single-ticker forward paper-trading engine exist), and this is documented as a real limitation
+rather than faked. `GET /api/experiments/{id}/forward-vs-historical` then compares the forward
+simulation's real observations against the experiment's own out-of-sample period (preferred, since
+it's held-out data) or its plain backtest (fallback) — flagging a return/drawdown difference of 10+
+percentage points as a "material deviation" using the same plain-threshold philosophy as drift
+detection, and explicitly labeling a thin forward sample as "still developing" rather than treating
+it as conclusive.
+
+**Research History** (`GET /api/experiments`) lists every experiment with a `group_count` — how
+many other experiments share the same (ticker universe, date range) — and flags groups at or above
+10 with a `data_mining_warning`. This is **disclosure, not an automatic statistical correction**: no
+p-value or significance test is applied; repeatedly searching the same historical data for a better
+result is simply made visible rather than hidden, per the research-integrity principle that a "best
+in-sample" configuration is a hypothesis to re-test, never a conclusion. `POST /api/experiments/
+compare` (2-5 experiments) warns explicitly when compared experiments cover different-length
+periods, different date ranges, different model versions, or different ticker universes, so a
+side-by-side table never implies a comparison it can't actually support.
+
+**Export:** `GET /api/experiments/{id}/export` returns the experiment's full stored JSON
+(configuration, results, provenance) as a downloadable file. There is no CSV export or a JSON
+*import* flow (beyond creating a new experiment from a pasted-in configuration via the normal create
+endpoint, which does validate it against the same schema) in this version — documented as a
+limitation rather than a half-built feature.
+
 ## No-Look-Ahead-Bias Guarantee
 
 This is enforced two ways, and both are unit tested:
@@ -811,7 +969,7 @@ cd backend
 venv\Scripts\python -m pytest -q
 ```
 
-**349 tests** in `backend/tests/` (313 unit/component + 36 real-network integration) cover: ticker
+**433 tests** in `backend/tests/` (392 unit/component + 41 real-network integration) cover: ticker
 validation, every indicator calculation (SMA, EMA,
 RSI, MACD, Bollinger Bands, ATR, ROC, historical volatility, relative volume) plus the interpretation
 layer that turns them into UI text (regression-tested after a real bug where the Bollinger lower-band
@@ -847,6 +1005,39 @@ tz-localizes synthetic fixtures for every new V4 module that aligns dates across
 a benchmark — a tz-naive fixture would not have caught any of the three prior real timezone bugs
 this project has hit, so it can't be trusted to catch a fourth.
 
+**V5 additions:** transaction-cost/slippage stress testing (identical-trades-across-scenarios
+invariant, gross-return-matches-a-direct-zero-cost-backtest exact equality, monotonic cost/return
+relationship); Monte Carlo's block-bootstrap-vs-IID-bootstrap basis selection, CAGR/loss/drawdown-
+threshold probabilities, and seed reproducibility of the new fields; model drift's threshold-based
+labeling logic (mocked for determinism) plus one full end-to-end pass through the real signal
+engine and regime classifier; and the Experiment Lab (creation, fingerprint determinism -
+including that ticker order and notes/tags never affect it -, configuration immutability across a
+run, the full lifecycle including the `VALIDATED`-only-when-every-requested-procedure-succeeded
+rule, portfolio experiments correctly flagging unsupported validation procedures, duplication,
+archiving, the research-history data-mining group-count threshold, comparison warnings for
+mismatched periods/versions/universes, forward-simulation linkage and its single-ticker-only
+restriction, forward-vs-historical comparison, atomic-write/corrupted-file persistence safety, and
+a generalized full-round-trip regression test written after this suite itself caught a real bug -
+`archived` was added to the `Experiment` dataclass but forgotten in the store's manual dict-to-
+dataclass reconstruction, so it silently reset to its default on every reload). Also new: a
+dedicated CORS regression test (`test_v5_cors.py`) that issues real preflight `OPTIONS` requests
+for every HTTP method actually in use, written after live browser testing caught a real bug no
+Python-side test could have (see below); and a health-endpoint test confirming it never calls
+Yahoo Finance and reports per-store persistence status.
+
+**Two real bugs were found and fixed via live end-to-end browser testing during the V5 phase, not
+by the automated suite** (both are exactly the class of issue only a real running server + real
+browser can expose): (1) the CORS middleware's `allow_methods` only listed `GET`/`POST`/`OPTIONS`,
+so adding the Experiment Lab's `PATCH` (edit notes) and `DELETE` (delete experiment) routes meant
+the browser's preflight request for those methods was silently rejected - and this turned out to
+also have silently broken the pre-existing `DELETE /api/watchlist/{ticker}` route from any browser,
+the whole time, since FastAPI's `TestClient` calls routes in-process and never triggers a real CORS
+preflight at all. (2) An experiment's stored backtest result was missing its equity/drawdown curves
+in the live browser even though the fix that added them had already been committed and covered by
+passing tests - because the *live backend process* serving the browser had not been restarted since
+that fix, a mismatch invisible to `pytest` (which re-imports fresh) and visible only by actually
+using the running application.
+
 **The most important test file is `tests/test_v3_no_look_ahead.py`**: rather than only proving
 indicators are unaffected by *truncating* future data (the older, weaker test), it directly proves
 that *mutating* future prices to a completely different, independently-generated path never changes
@@ -856,10 +1047,12 @@ for the signal engine, the full signal history, and the backtest engine.
 `tests/test_integration_real_data.py` is a **separate, real-network** suite that hits live Yahoo
 Finance data for `AAPL`, `MSFT`, `NVDA`, and an invalid ticker — covering the overview, technical,
 signal (incl. model version/score breakdown/stability), signal-history, fundamentals,
-relative-strength, market-regime, regime-performance, model-info, out-of-sample, sensitivity,
-walk-forward, Monte Carlo, watchlist, paper-trade, and backtest (incl. `advanced_metrics`)
-endpoints — and inspects the actual returned structure (not just HTTP 200). It auto-skips if no
-network access is available.
+relative-strength, market-regime, regime-performance, model-info, out-of-sample, sensitivity (incl.
+its heatmap), walk-forward, Monte Carlo (incl. the V5 probability statistics), cost stress, model
+drift, watchlist, paper-trade, portfolio backtesting, stock comparison, the model scorecard,
+model-version comparison, a full create→run→reopen→duplicate→list→delete experiment lifecycle, the
+paper-portfolio listing, and backtest (incl. `advanced_metrics`) endpoints — and inspects the actual
+returned structure (not just HTTP 200). It auto-skips if no network access is available.
 
 Two real bugs were found and fixed via real-data testing during this pass (both timezone-naive vs.
 timezone-aware datetime mismatches - real yfinance data is tz-aware, synthetic test fixtures were
@@ -918,14 +1111,18 @@ Documented honestly rather than silently omitted:
   [Forward Validation](#forward-validation-paper-trading--backtesting)), but are surfaced there and
   in the Model Scorecard rather than added to the original lightweight `GET /api/paper-portfolio/risk`
   dashboard, which still reports exposure/cash/concentration only.
-- **Multiple concurrent forward-paper simulations** per model/strategy variant are supported only
-  through the existing `portfolio_id` mechanism (distinct IDs = distinct, independently-tracked
-  simulations with their own equity history) - there is no dedicated UI for creating/naming/listing
-  many simulations side by side yet.
+- **Multiple concurrent forward-paper simulations** per model/strategy variant are supported via
+  the existing `portfolio_id` mechanism, now discoverable and switchable through the Multi-
+  Simulation panel and `GET /api/paper-portfolios` (see [Multi-Simulation](#multi-simulation)) -
+  there is no side-by-side comparison *table* of several simulations' equity curves yet, only
+  individual cards plus each one's own Forward Validation page.
 - **Portfolio backtesting constraint interactions** (e.g. a sector cap combined with a tight cash
   allocation) are resolved by sequential waterfall passes documented in
   [Portfolio Backtesting](#portfolio-backtesting), not a joint optimizer - correct and tested, but
-  not the global-optimum allocation a full solver would produce.
+  not the global-optimum allocation a full solver would produce. This was a deliberate choice per
+  the explicit guidance that a joint optimizer should only be built if it adds more value than
+  complexity; the waterfall approach was judged sufficient and is documented rather than silently
+  assumed to be optimal.
 - **Stock comparison** shows retrieved values side by side with no cross-ticker normalization or
   ranking by design (see [Stock Comparison](#stock-comparison)) - there is no "which of these is
   better" score, intentionally.
@@ -933,7 +1130,20 @@ Documented honestly rather than silently omitted:
   by design - see [Model Scorecard & Model-vs-Model Comparison](#model-scorecard--model-vs-model-comparison).
 - **Custom strategy parameters** (a UI for overriding thresholds/weights outside of the sensitivity
   endpoint, with an explicit "CUSTOM MODEL" label) are not exposed beyond the `model_version` and
-  sensitivity-analysis paths already described above.
+  sensitivity-analysis paths already described above. Signal **category weights** (Trend/Momentum/
+  Volume/Volatility) specifically remain fixed, non-configurable point ranges in the signal engine
+  - making them a runtime parameter was judged to risk destabilizing the core scoring engine for
+  a research feature of uncertain value, so it was deliberately not built rather than built unsafely.
+- **Experiment Lab forward-simulation linkage** only supports single-ticker experiments - there is
+  no portfolio-level *forward* paper-trading engine yet (only the historical portfolio-backtest
+  engine and the single-ticker forward engine exist). See
+  [Experiment Lab & Research History](#experiment-lab--research-history).
+- **Experiment export** is JSON-only (a full download of the stored configuration + results); there
+  is no CSV export and no dedicated "import a pasted JSON config" flow beyond the normal create
+  endpoint (which does validate an arbitrary config against the same schema).
+- **Model version registry / changelog** is not a dedicated feature - `GET /api/model` documents
+  each supported version's methodology, but there is no structured changelog UI tracking exactly
+  what changed between v1.0 and v1.1 beyond the prose `version_notes` already there.
 - The watchlist and paper-trading stores are single-user JSON files with no authentication - fine
   for local/personal use, not suitable for multi-tenant deployment without adding a real user
   system first.
