@@ -48,6 +48,7 @@ import type {
   WalkForwardRequestPayload,
   WalkForwardResponse,
 } from "@/types/api";
+import type { Notification, NotificationListResponse, Preferences, SessionListResponse, User } from "@/types/auth";
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
@@ -63,12 +64,35 @@ export class ApiError extends Error {
   }
 }
 
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method || "GET").toUpperCase();
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...(init?.headers as Record<string, string> || {}) };
+  // Double-submit CSRF: the backend requires the signed csrf_token cookie's
+  // value echoed back in this header on every state-changing request (see
+  // backend/app/auth/dependencies.py:require_csrf). Safe methods never need it.
+  if (!SAFE_METHODS.has(method)) {
+    const csrfToken = readCookie("csrf_token");
+    if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
+  }
+
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
-      headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+      method,
+      headers,
+      // Session/CSRF cookies are httpOnly (session) / same-site (csrf) and
+      // must be sent on every request, including cross-origin ones between
+      // the frontend and backend dev servers.
+      credentials: "include",
     });
   } catch {
     throw new ApiError(0, "NETWORK_ERROR", "Could not reach the analysis server. Is the backend running?");
@@ -87,6 +111,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(res.status, errorType, detail);
   }
 
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -406,4 +431,135 @@ export function getForwardVsHistorical(id: string, signal?: AbortSignal) {
 
 export function getExperimentExportUrl(id: string): string {
   return `${API_BASE_URL}/api/experiments/${encodeURIComponent(id)}/export`;
+}
+
+// --------------------------------------------------------------- Auth
+
+export function registerAccount(payload: {
+  email: string;
+  password: string;
+  display_name: string;
+  accept_terms: boolean;
+  marketing_consent?: boolean;
+}) {
+  return apiFetch<User>("/api/auth/register", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function login(email: string, password: string) {
+  return apiFetch<User>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+}
+
+export function logout() {
+  return apiFetch<{ message: string }>("/api/auth/logout", { method: "POST" });
+}
+
+export function getCurrentUser(signal?: AbortSignal) {
+  return apiFetch<User>("/api/auth/me", { signal });
+}
+
+export function requestPasswordReset(email: string) {
+  return apiFetch<{ message: string }>("/api/auth/password-reset/request", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export function confirmPasswordReset(token: string, new_password: string) {
+  return apiFetch<{ message: string }>("/api/auth/password-reset/confirm", {
+    method: "POST",
+    body: JSON.stringify({ token, new_password }),
+  });
+}
+
+export function requestEmailVerification() {
+  return apiFetch<{ message: string }>("/api/auth/email-verification/request", { method: "POST" });
+}
+
+export function confirmEmailVerification(token: string) {
+  return apiFetch<User>("/api/auth/email-verification/confirm", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export function changePassword(current_password: string, new_password: string) {
+  return apiFetch<{ message: string }>("/api/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ current_password, new_password }),
+  });
+}
+
+export function requestEmailChange(new_email: string, current_password: string) {
+  return apiFetch<{ message: string }>("/api/auth/change-email/request", {
+    method: "POST",
+    body: JSON.stringify({ new_email, current_password }),
+  });
+}
+
+export function confirmEmailChange(token: string) {
+  return apiFetch<User>("/api/auth/change-email/confirm", { method: "POST", body: JSON.stringify({ token }) });
+}
+
+export function deleteAccount() {
+  return apiFetch<{ message: string }>("/api/auth/account", { method: "DELETE" });
+}
+
+export function listSessions(signal?: AbortSignal) {
+  return apiFetch<SessionListResponse>("/api/auth/sessions", { signal });
+}
+
+export function revokeSession(sessionId: string) {
+  return apiFetch<{ message: string }>(`/api/auth/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+}
+
+export function revokeOtherSessions() {
+  return apiFetch<{ message: string }>("/api/auth/sessions/revoke-others", { method: "POST" });
+}
+
+// ------------------------------------------------------------ Settings
+
+export function getPreferences(signal?: AbortSignal) {
+  return apiFetch<Preferences>("/api/settings/preferences", { signal });
+}
+
+export function updatePreferences(patch: Partial<Preferences>) {
+  return apiFetch<Preferences>("/api/settings/preferences", { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export function completeOnboarding() {
+  return apiFetch<Preferences>("/api/settings/onboarding/complete", { method: "POST" });
+}
+
+// -------------------------------------------------------- Notifications
+
+export function listNotifications(unreadOnly = false, signal?: AbortSignal) {
+  return apiFetch<NotificationListResponse>(`/api/notifications?unread_only=${unreadOnly}`, { signal });
+}
+
+export function getUnreadNotificationCount(signal?: AbortSignal) {
+  return apiFetch<{ unread_count: number }>("/api/notifications/unread-count", { signal });
+}
+
+export function markNotificationRead(id: string) {
+  return apiFetch<{ marked: number }>(`/api/notifications/${encodeURIComponent(id)}/read`, { method: "POST" });
+}
+
+export function markAllNotificationsRead() {
+  return apiFetch<{ marked: number }>("/api/notifications/read-all", { method: "POST" });
+}
+
+export type { Notification };
+
+// -------------------------------------------------------------- Support
+
+export function submitContactRequest(payload: {
+  contact_email: string;
+  category: string;
+  subject: string;
+  message: string;
+}) {
+  return apiFetch<{ id: string; created_at: string; message: string }>("/api/support", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }

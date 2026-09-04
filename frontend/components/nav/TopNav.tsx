@@ -3,9 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
-import { ActivitySquare, Menu, X } from "lucide-react";
+import { ActivitySquare, Menu, Search, X } from "lucide-react";
 import { useState } from "react";
 import { TickerSearch } from "@/components/search/TickerSearch";
+import { AccountMenu } from "@/components/auth/AccountMenu";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { CommandPalette } from "@/components/command-palette/CommandPalette";
 
 const NAV_LINKS = [
   { href: "/", label: "Overview" },
@@ -19,6 +22,7 @@ const NAV_LINKS = [
   { href: "/research", label: "Research History" },
   { href: "/paper-trading", label: "Paper Trading" },
   { href: "/model", label: "Model" },
+  { href: "/docs", label: "Docs" },
 ];
 
 export default function TopNav() {
@@ -62,6 +66,19 @@ export default function TopNav() {
             <TickerSearch compact />
           </div>
 
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))}
+              className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-text-faint border border-border hover:border-border-strong hover:text-text-muted cursor-pointer"
+              aria-label="Open command palette"
+            >
+              <Search size={13} aria-hidden="true" />
+              <kbd className="font-mono">Ctrl K</kbd>
+            </button>
+            <NotificationBell />
+            <AccountMenu />
+          </div>
+
           <button
             className="md:hidden p-2 text-text-muted hover:text-text-primary cursor-pointer"
             onClick={() => setMobileOpen((o) => !o)}
@@ -96,6 +113,7 @@ export default function TopNav() {
           </div>
         )}
       </div>
+      <CommandPalette />
     </header>
   );
 }
