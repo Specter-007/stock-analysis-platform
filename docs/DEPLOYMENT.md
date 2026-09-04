@@ -76,17 +76,46 @@ symptom: `POST /api/auth/login` → `200`, immediately followed by
 `GET /api/auth/me` → `401`, because the browser never sent the session
 cookie back on the second request.
 
-**Fix: a same-origin API proxy**, using Next.js's own `rewrites()`
-(`frontend/next.config.ts`). The browser only ever talks to the frontend's
-own origin (`/api/*`); Vercel forwards that server-side to the real
-Render backend. From the browser's point of view every request - login,
-`/me`, watchlist, everything - is same-origin, so `SameSite=Lax`,
-`Secure`, and `HttpOnly` all keep working exactly as configured. **No
-cookie or CORS security setting was loosened to fix this** - the backend's
-`app/auth/cookies.py` is unchanged, and neither is its CORS/CSRF
-configuration.
+**Fix: a same-origin API proxy.** The browser only ever talks to the
+frontend's own origin (`/api/*`); this app forwards that request
+server-side to the real Render backend. From the browser's point of view
+every request - login, `/me`, watchlist, everything - is same-origin, so
+`SameSite=Lax`, `Secure`, and `HttpOnly` all keep working exactly as
+configured. **No cookie or CORS security setting was loosened to fix
+this** - the backend's `app/auth/cookies.py` is unchanged, and neither is
+its CORS/CSRF configuration.
 
-Required Vercel environment variables for this to work:
+**Implementation history, because it matters for anyone touching this
+again**: the first attempt at this proxy used Next.js's declarative
+`rewrites()` (`frontend/next.config.ts`). It passed local testing (a
+production build run via `next start` against a real local backend) but
+**did not work in real Vercel production** - login still returned 200
+while `/api/auth/me` still returned 401. Root cause: rewriting to an
+*external* destination is handled by Vercel's own opaque edge-routing
+layer, not by the same code path `next start` uses locally, and it did
+not reliably forward the `Cookie` request header and/or the backend's
+`Set-Cookie` response headers end to end. This is now implemented instead
+as an explicit Next.js Route Handler
+(`frontend/app/api/[...path]/route.ts`, logic in
+`frontend/lib/backend-proxy.ts`) - this app's own code, using `fetch()`
+directly, so both directions are forwarded under its own control and can
+be verified rather than trusted. One subtlety this handler specifically
+gets right that a naive implementation would not: a response can carry
+**multiple** `Set-Cookie` headers (login sets two - `session_token` and
+`csrf_token`) - `Headers.get("set-cookie")` merges them into a single,
+invalid, comma-joined string, silently breaking one or both cookies; this
+uses `Headers.getSetCookie()` and re-appends each cookie individually.
+See `frontend/lib/backend-proxy.test.ts` for regression coverage of this
+exact behavior (mocked backend, no network needed), and the "Frontend"
+section of this document's audit history for how this was actually
+verified against a real local backend (not just asserted): register,
+login, `/me`, logout, CSRF-protected and unauthenticated requests, and
+watchlist all round-tripped correctly, including confirming both
+`Set-Cookie` headers arrive as separate headers rather than merged.
+
+Required Vercel environment variables for this to work (unchanged from
+the previous attempt - this is a server-side implementation change, not
+a configuration change):
 
 | Variable | Value | Scope |
 |---|---|---|
@@ -105,9 +134,9 @@ Steps:
    variables above, scoped to Production.
 2. **Trigger a new deployment** - Next.js bakes `NEXT_PUBLIC_*` variables
    into the build at build time; `BACKEND_URL` is read at request time by
-   Vercel's rewrite layer, but redeploying after any env var change is the
-   safe default regardless (**Deployments** → **⋯** → **Redeploy**, or
-   push a new commit).
+   the Route Handler (a serverless function), but redeploying after any
+   env var change is the safe default regardless (**Deployments** → **⋯**
+   → **Redeploy**, or push a new commit).
 3. Local development is unaffected: `frontend/.env.local` (gitignored)
    keeps `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000` set, so
    `npm run dev` continues to call a locally-running backend directly -
