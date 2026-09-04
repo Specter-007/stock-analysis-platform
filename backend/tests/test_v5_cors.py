@@ -60,3 +60,45 @@ def test_preflight_allows_delete_for_watchlist():
     caught regardless of which route exercises it first.
     """
     assert _preflight_allows("/api/watchlist/AAPL", "DELETE")
+
+
+# --- Final production-hardening pass: an explicitly disallowed origin ---
+
+
+def test_preflight_from_disallowed_origin_does_not_grant_cors_headers():
+    """A request from an origin NOT in CORS_ALLOWED_ORIGINS must not receive
+    an Access-Control-Allow-Origin header naming that origin - the browser
+    enforces CORS based on this header, so its absence (or a mismatched
+    value) is what actually blocks the cross-origin response from being
+    read by the malicious page's JavaScript.
+    """
+    evil_origin = "https://evil.example.com"
+    resp = client.options(
+        "/api/experiments",
+        headers={
+            "Origin": evil_origin,
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+    allow_origin = resp.headers.get("access-control-allow-origin")
+    assert allow_origin != evil_origin
+    assert allow_origin != "*"
+
+
+def test_actual_get_request_from_disallowed_origin_lacks_cors_header():
+    """Even a real (non-preflight) GET from a disallowed origin must not
+    come back with an Access-Control-Allow-Origin naming that origin - the
+    request still executes server-side (CORS is enforced by the browser,
+    not the server refusing to run the handler), but the browser will
+    refuse to expose the response to the page's script without this header.
+    """
+    resp = client.get("/api/health", headers={"Origin": "https://evil.example.com"})
+    allow_origin = resp.headers.get("access-control-allow-origin")
+    assert allow_origin != "https://evil.example.com"
+    assert allow_origin != "*"
+
+
+def test_actual_get_request_from_allowed_origin_has_matching_cors_header():
+    resp = client.get("/api/health", headers={"Origin": "http://localhost:3000"})
+    assert resp.headers.get("access-control-allow-origin") == "http://localhost:3000"

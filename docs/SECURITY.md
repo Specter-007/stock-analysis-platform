@@ -147,6 +147,49 @@ enforce.**
   `logger.exception` but returned to the client as a generic message
   (`app/api/errors.py`), never a raw stack trace.
 
+## Dependency audit
+
+`pip-audit` was run against `backend/requirements.txt` during the final
+hardening pass:
+
+```
+Found 1 known vulnerability in 1 package
+Name   Version ID              Fix Versions
+------ ------- --------------- ------------
+pytest 8.3.4   PYSEC-2026-1845 9.0.3
+```
+
+`pytest` is a test-time-only dependency - it is never imported by the
+running application (`app.main`) and ships in no production artifact, so
+this does not affect the deployed attack surface. Documented rather than
+silently ignored; upgrading to pytest 9 (a major version) was not done in
+this pass to avoid an unreviewed test-collection/fixture behavior change
+this late in the hardening effort - track it as a follow-up.
+
+This is an **automated dependency scan**, not a manual audit of each
+package's source, and not a substitute for a human security review.
+
+## Real PostgreSQL concurrency findings
+
+`tests/test_postgresql_real.py` (see [DATABASE.md](DATABASE.md)) verified
+two concrete concurrency properties against a real PostgreSQL server: a
+second session correctly observes a first session's already-committed
+write (no stale-read/lost-update), and a duplicate-slug race between two
+sessions is rejected by the real unique constraint rather than silently
+creating two rows or overwriting one. One deliberately **not** fixed in
+this pass: paper-trading equity snapshots are appended to a JSON array
+inside a single `paper_portfolios.state` column (see
+[DATABASE.md](DATABASE.md)), not a separate table with its own unique
+constraint - two genuinely concurrent requests for the *same* portfolio on
+the *same* day (e.g. the same user with two browser tabs open) could in
+principle both pass the "not already recorded today" check before either
+commits, producing two snapshot entries for one day. This is a narrow,
+low-severity window (a single user racing themselves, not a security
+issue), not fixed here because doing so correctly would mean moving equity
+snapshots to their own table - a genuine schema change beyond this
+hardening pass's "do not rebuild the quant/persistence architecture"
+scope. Documented as a known limitation, not silently accepted.
+
 ## Known limitations (honest, not exhaustive)
 
 - No automated penetration test or third-party security audit has been
