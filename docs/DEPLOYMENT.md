@@ -6,6 +6,28 @@ provisioned, no domain configured, no PostgreSQL server stood up. Treat
 everything below as instructions to follow, not a description of a live
 system.
 
+## Recommended architecture
+
+Nothing here is hardcoded into the app - it's provider-agnostic (a
+`DATABASE_URL`, a `FRONTEND_URL`/`BACKEND_URL` pair, standard SMTP
+settings). The choices below are a concrete, realistic starting point,
+not a requirement.
+
+| Concern | Recommendation | Cost | Why / caveat |
+|---|---|---|---|
+| Frontend hosting | **Vercel** | Free tier | Zero-config for Next.js (this app's exact framework); its free tier is a real, ongoing free tier, not a trial. |
+| Backend hosting | **Render** (Web Service) | Free tier, with a real caveat | Free web services spin down after ~15 minutes of inactivity - the first request after idle pays a cold start (tens of seconds, since it's a full process restart, not just a DB wake-up). Acceptable for a low-traffic/personal deployment; upgrade to a paid instance to remove this if it matters. Fly.io is a reasonable alternative with a similar shape. |
+| PostgreSQL | **Neon** | Free tier (see [DATABASE.md](DATABASE.md)) | Already justified above - genuinely free, not time-limited, `DATABASE_URL`-compatible with zero code changes. |
+| Redis (only if `RATE_LIMIT_STORAGE_URL` is actually used) | **Upstash** | Free tier | Only needed once you run more than one backend instance/process - see [SECURITY.md](SECURITY.md#rate-limiting). Do not provision this for a single-instance deployment; there is nothing for it to do. |
+| SMTP (transactional email) | **Resend** or **Brevo** | Free tier (low daily send limit - check current provider limits before relying on it at scale) | Either works with the existing `SMTP_HOST`/`SMTP_PORT`/`SMTP_USERNAME`/`SMTP_PASSWORD` variables in `app/auth/email.py` unchanged - no provider-specific SDK needed. |
+| DNS / domain | Whatever registrar you already use, pointed at Vercel (frontend) and Render (backend, typically a subdomain like `api.yourdomain.com`) | Domain registration cost only | Keep frontend and backend on the same registrable domain (different subdomains is fine) - see the CORS/cookies note below; a raw IP or an unrelated domain breaks session cookies. |
+| HTTPS | Automatic on both Vercel and Render for custom domains | Free | `SESSION_COOKIE_SECURE` is forced on in production (see below), so this is not optional. |
+
+This entire architecture fits inside free tiers for a low-traffic
+deployment, with two honest, documented tradeoffs: Render's free-tier cold
+start, and Neon's free-tier autosuspend cold start. Both only affect the
+*first* request after a period of inactivity, not steady-state usage.
+
 ## Prerequisites
 
 - A PostgreSQL server (see [DATABASE.md](DATABASE.md) - not verified
@@ -124,6 +146,14 @@ server-side (`logger.warning`/`logger.exception`) without ever including
 passwords, tokens, or API keys - only the generic error is returned to the
 client. Point your log aggregator at stdout/stderr; no file-based logging
 is configured.
+
+Every request is assigned a correlation id (`app/request_id.py`), returned
+as an `X-Request-ID` response header and included in every log line for
+that request (`[request_id]` in the log format) - grep a user-reported
+`X-Request-ID` straight to the relevant server logs. A caller-supplied id
+(e.g. from an upstream proxy/CDN) is reused if it looks like a reasonable
+token, otherwise a fresh one is generated rather than trusting it verbatim
+into logs.
 
 ## Backups
 

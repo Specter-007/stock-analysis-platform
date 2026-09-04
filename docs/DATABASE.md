@@ -33,6 +33,49 @@ configuration defaults from this embedded build - re-run `alembic upgrade
 head` plus the application's test suite against your actual production
 target before launch.
 
+## Choosing a managed PostgreSQL provider
+
+The app has no provider-specific code - anything that speaks
+`postgresql+psycopg2://` over `DATABASE_URL` works unchanged. Evaluated for
+this pass, with an eye toward "prefer simple/low-cost, never at the
+expense of correctness":
+
+| Provider | Free tier | Notable tradeoff |
+|---|---|---|
+| **Neon** (recommended) | Yes, genuinely free and not time-limited (storage-capped, not calendar-capped). | Autosuspends after inactivity - the first query after idle pays a cold-start (typically 1-3s) to resume the compute. Ships a separate pooled connection string (PgBouncer, transaction mode) alongside the direct one. |
+| **Supabase** | Yes, free tier available. | Free-tier projects pause after a period of inactivity and require a manual dashboard action to resume - worse for an app that might sit unused between sessions than Neon's automatic resume. Bundles auth/storage/realtime features this app doesn't use. |
+| **Render (managed Postgres)** | Time-limited only - free Postgres instances are **deleted after 90 days**, not indefinitely free. | Not a realistic "free tier" for anything beyond a demo; would require the paid tier for a real deployment. |
+| **Railway** | No meaningful free tier (usage-based billing from the start). | Good developer experience, but a paid requirement, not a free option. |
+
+**Recommendation: Neon.** It's the only option here that's both genuinely
+free indefinitely and requires zero code changes - copy its pooled
+connection string (already includes `?sslmode=require`) into
+`DATABASE_URL`, run `alembic upgrade head`, done. The autosuspend
+cold-start is a real, honest limitation for a low-traffic deployment (the
+first request after a period of idle will be slower) - acceptable for a
+personal/small-scale deployment, and removable by upgrading to Neon's
+always-on tier if that latency becomes a problem. Supabase is a fine
+second choice if you already use it for something else; Render/Railway
+are not free in any way that holds up for a real, ongoing deployment.
+
+**SSL/TLS:** not configured in application code - it's carried entirely in
+the `DATABASE_URL` query string (e.g. `?sslmode=require`). Every managed
+provider's own connection-string generator already includes this; use the
+string they give you verbatim rather than constructing one by hand.
+
+**Connection pooling:** `app/db/base.py` sets `pool_pre_ping=True` (so a
+connection the provider silently closed server-side is detected and
+transparently replaced instead of surfacing as a 500 on the next request)
+and `pool_recycle=1800` (proactively replaces pooled connections older
+than 30 minutes, for providers that enforce a hard connection lifetime).
+SQLAlchemy's own pool defaults otherwise apply (`pool_size=5,
+max_overflow=10` - up to 15 connections per backend **process**). If you
+run multiple worker processes (`uvicorn --workers N`) against a
+connection-limited free tier, either lower these via
+`create_engine(..., pool_size=..., max_overflow=...)` or use the
+provider's own pooled connection string (Neon/Supabase both offer a
+PgBouncer-fronted variant intended for exactly this).
+
 ## Connection configuration
 
 Everything is driven by the `DATABASE_URL` environment variable
@@ -114,21 +157,53 @@ documented here so it isn't a surprise next time.
 
 ## Backups and recovery
 
-**No backup system has been configured or automated in this repository.**
-This section documents the mechanics you would use, not a claim that
-backups are already running - do not treat this as "backups are handled."
+**No backup system has been configured or automated by this repository.**
+This section documents the real strategy to use for the recommended
+Neon deployment (see above), and the manual fallback mechanics - not a
+claim that backups are already running. Never treat this document as
+"backups are handled" until you have actually enabled and verified one of
+the options below against your own project.
 
-- **Manual dump:** `pg_dump -Fc stock_analyst > backup.dump`
-- **Restore:** `pg_restore -d stock_analyst backup.dump`
-- **Point-in-time recovery** requires WAL archiving, which is a PostgreSQL
-  server/hosting-provider configuration decision outside this repo's
-  scope - most managed Postgres providers (RDS, Cloud SQL, Supabase, etc.)
-  offer this as a checkbox; a self-hosted server needs `archive_mode` and
-  a WAL-shipping destination configured explicitly.
+**Recommended: enable the provider's built-in backups.** Neon retains
+point-in-time recovery history automatically (retention window depends on
+plan - check your current plan's retention period in the Neon dashboard,
+since free-tier retention is shorter than paid tiers) and lets you restore
+to any point within that window, or branch a new database from a past
+point, from the dashboard - no application code or cron job required.
+Supabase offers the equivalent under its own dashboard's backup settings.
+**This still requires a one-time action on your part** (confirming the
+retention window meets your needs, and - for providers where it isn't
+automatic - actually turning it on); this repository cannot do that for
+you from inside the codebase.
+
+- **Frequency/retention:** governed by the provider's plan, not by this
+  app. Record whatever your actual plan's retention window is (e.g. "7
+  days of point-in-time recovery on Neon's free tier" - verify the current
+  number for your plan rather than trusting this document to stay
+  accurate) somewhere your team will see it before assuming a longer
+  window is available.
+- **Verification:** periodically perform an actual test restore (to a
+  throwaway branch/database, not production) and confirm the app starts
+  and reads real data against it - a backup that has never been restored
+  is unverified, not a backup.
+- **Manual dump (works against any Postgres, provider-native backups or
+  not):** `pg_dump -Fc "$DATABASE_URL" > backup.dump`
+- **Restore:** `pg_restore -d "$DATABASE_URL" backup.dump`
+- **Point-in-time recovery via WAL archiving** is what the provider-native
+  option above already gives you; only relevant to configure by hand
+  (`archive_mode` + a WAL-shipping destination) for a fully self-hosted
+  Postgres server, which is not what this app's recommended architecture
+  uses.
 - **Migration rollback:** `alembic downgrade -1` reverts the schema; it
   does **not** restore data a destructive migration may have dropped -
-  always take a real database backup before running a migration that
-  drops or alters a column in a production environment with real data.
+  always take a real backup (a manual `pg_dump`, or confirm your
+  provider's PITR window covers the change) before running a migration
+  that drops or alters a column in a production environment with real
+  data.
+- **Disaster recovery expectation:** if the database is lost entirely
+  (accidental deletion, provider incident), recovery time is bounded by
+  how recently you verified a restore actually works, not by how recently
+  a backup was *taken* - an untested backup is a guess, not a plan.
 
 ## Local dev workflow
 

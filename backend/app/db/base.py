@@ -30,11 +30,26 @@ DATABASE_URL = os.environ.get("DATABASE_URL", f"sqlite:///{DEFAULT_SQLITE_PATH.a
 
 _is_sqlite = DATABASE_URL.startswith("sqlite")
 _connect_args: dict = {}
+_engine_kwargs: dict = {"future": True}
 if _is_sqlite:
     DEFAULT_SQLITE_PATH.parent.mkdir(parents=True, exist_ok=True)
     _connect_args = {"check_same_thread": False}
+else:
+    # Managed PostgreSQL providers commonly close idle connections
+    # server-side (directly, or via a pooler in front of them) without the
+    # client finding out until the next query fails with "server closed
+    # the connection unexpectedly". pool_pre_ping issues a cheap check
+    # before handing a pooled connection to a request, transparently
+    # reconnecting instead of surfacing that as a 500. pool_recycle bounds
+    # how long a connection may sit in the pool before being proactively
+    # replaced, for providers that enforce a hard connection lifetime.
+    # SSL/TLS is not configured here - it's a DATABASE_URL query-string
+    # concern (e.g. `?sslmode=require`); use the exact connection string
+    # your provider gives you, which already includes it.
+    _engine_kwargs["pool_pre_ping"] = True
+    _engine_kwargs["pool_recycle"] = 1800
 
-engine = create_engine(DATABASE_URL, connect_args=_connect_args, future=True)
+engine = create_engine(DATABASE_URL, connect_args=_connect_args, **_engine_kwargs)
 
 if _is_sqlite:
     @event.listens_for(engine, "connect")

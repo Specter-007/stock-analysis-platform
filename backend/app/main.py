@@ -26,6 +26,7 @@ from app.body_size_limit import BodySizeLimitMiddleware
 from app.config import MODEL_VERSION_CURRENT
 from app.db.base import get_db
 from app.rate_limit import limiter
+from app.request_id import RequestIDMiddleware
 from app.security_headers import SecurityHeadersMiddleware
 from app.settings import CORS_ALLOWED_ORIGINS
 from app.utils.logging_config import configure_logging
@@ -59,6 +60,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+# Outermost middleware (added last): assigns/reuses a request id before
+# anything else runs, so every log line for this request - including ones
+# from the middleware above - carries it, and it's still attached to the
+# response even if a later middleware/handler raises.
+app.add_middleware(RequestIDMiddleware)
 
 register_exception_handlers(app)
 
