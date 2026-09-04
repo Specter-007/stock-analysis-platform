@@ -8,6 +8,7 @@ import { SkeletonText } from "@/components/ui/Skeleton";
 import type { ApiError } from "@/lib/api";
 import { ModelScorecardPanel } from "./ModelScorecardPanel";
 import { ModelVersionComparisonPanel } from "./ModelVersionComparisonPanel";
+import { ModelDriftPanel } from "./ModelDriftPanel";
 
 export default function ModelPageClient() {
   const { data, loading, error } = useApiResource((signal) => getModelInfo(signal), []);
@@ -33,6 +34,8 @@ export default function ModelPageClient() {
           <ModelScorecardPanel />
 
           <ModelVersionComparisonPanel />
+
+          <ModelDriftPanel />
 
           <Card>
             <CardHeader title="Version" subtitle={`Current: Quant Model v${data.current_version}`} />

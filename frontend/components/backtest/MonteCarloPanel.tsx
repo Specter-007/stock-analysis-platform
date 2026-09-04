@@ -23,6 +23,8 @@ export function MonteCarloPanel({
   slippageBps: number;
 }) {
   const [simulations, setSimulations] = useState(1000);
+  const [seed, setSeed] = useState<string>("");
+  const [drawdownThreshold, setDrawdownThreshold] = useState(20);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<MonteCarloResponse | null>(null);
@@ -39,6 +41,8 @@ export function MonteCarloPanel({
         transaction_cost_bps: transactionCostBps,
         slippage_bps: slippageBps,
         simulations,
+        seed: seed.trim() ? Number(seed) : null,
+        drawdown_threshold_percent: -Math.abs(drawdownThreshold),
       });
       setResult(res);
     } catch (err) {
@@ -64,6 +68,28 @@ export function MonteCarloPanel({
             min={100}
             max={5000}
             onChange={(e) => setSimulations(Number(e.target.value))}
+            className="bg-bg-elevated border border-border-strong rounded-md px-3 py-2 text-sm text-text-primary w-28"
+          />
+        </label>
+        <label className="flex flex-col gap-1.5 text-xs">
+          <span className="text-text-muted font-medium">Seed (optional)</span>
+          <input
+            type="number"
+            value={seed}
+            placeholder="Random"
+            onChange={(e) => setSeed(e.target.value)}
+            className="bg-bg-elevated border border-border-strong rounded-md px-3 py-2 text-sm text-text-primary w-28"
+          />
+        </label>
+        <label className="flex flex-col gap-1.5 text-xs">
+          <span className="text-text-muted font-medium">Drawdown Threshold %</span>
+          <input
+            type="number"
+            value={drawdownThreshold}
+            step={5}
+            min={1}
+            max={100}
+            onChange={(e) => setDrawdownThreshold(Number(e.target.value))}
             className="bg-bg-elevated border border-border-strong rounded-md px-3 py-2 text-sm text-text-primary w-28"
           />
         </label>
@@ -93,9 +119,21 @@ export function MonteCarloPanel({
               <Stat label="Median Max DD" value={formatPercent(result.median_max_drawdown_percent)} tone="bearish" />
               <Stat label="Worst Max DD" value={formatPercent(result.worst_max_drawdown_percent)} tone="bearish" />
             </div>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3">
+              <Stat label="Median CAGR" value={formatPercent(result.median_cagr_percent)} />
+              <Stat label="5th %ile CAGR" value={formatPercent(result.percentile_5_cagr_percent)} tone="bearish" />
+              <Stat label="95th %ile CAGR" value={formatPercent(result.percentile_95_cagr_percent)} tone="bullish" />
+              <Stat label="Probability of Loss" value={formatPercent(result.probability_of_loss_percent)} tone="bearish" />
+              <Stat
+                label={`P(DD > ${Math.abs(result.drawdown_threshold_percent)}%)`}
+                value={formatPercent(result.probability_of_exceeding_drawdown_threshold_percent)}
+                tone="bearish"
+              />
+            </div>
             <p className="text-[11px] text-text-faint">
-              Based on {result.sample_size} historical {result.resampling_basis === "trade_returns" ? "trades" : "daily returns"} ·{" "}
-              {result.simulations} simulations
+              Based on {result.sample_size} historical {result.resampling_basis === "trade_returns" ? "trades" : "daily returns"} (
+              {result.resampling_method.replace(/_/g, " ")}) · {result.simulations} simulations · seed:{" "}
+              {result.seed === null ? "random" : result.seed}
             </p>
             <p className="text-[11px] text-text-faint leading-relaxed mt-2">{result.methodology}</p>
           </>

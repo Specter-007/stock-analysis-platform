@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { RotateCcw, ArrowDownCircle, ArrowUpCircle, FlaskConical, XCircle, ShieldAlert } from "lucide-react";
 import { clsx } from "clsx";
 import { getPaperPortfolio, getPaperRisk, postPaperTrade, resetPaperPortfolio, closeAllPaperPositions, ApiError } from "@/lib/api";
@@ -11,16 +12,23 @@ import { SkeletonText } from "@/components/ui/Skeleton";
 import { formatCurrency, formatPercent, formatPrice } from "@/lib/format";
 import type { PaperPortfolioResponse, PositionSizingMode } from "@/types/api";
 import { ForwardValidationPanel } from "./ForwardValidationPanel";
-
-const PORTFOLIO_ID = "default";
+import { MultiSimulationPanel } from "./MultiSimulationPanel";
 
 export default function PaperTradingPageClient() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const PORTFOLIO_ID = searchParams.get("portfolio") || "default";
+
   const [refreshKey, setRefreshKey] = useState(0);
   const { data, loading, error } = useApiResource(
     (signal) => getPaperPortfolio(PORTFOLIO_ID, signal),
-    [refreshKey]
+    [PORTFOLIO_ID, refreshKey]
   );
-  const { data: risk } = useApiResource((signal) => getPaperRisk(PORTFOLIO_ID, signal), [refreshKey, data?.current_value]);
+  const { data: risk } = useApiResource((signal) => getPaperRisk(PORTFOLIO_ID, signal), [PORTFOLIO_ID, refreshKey, data?.current_value]);
+
+  function selectPortfolio(id: string) {
+    router.push(`/paper-trading?portfolio=${encodeURIComponent(id)}`);
+  }
 
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -116,6 +124,8 @@ export default function PaperTradingPageClient() {
           </button>
         </div>
       </div>
+
+      <MultiSimulationPanel activePortfolioId={PORTFOLIO_ID} onSelect={selectPortfolio} refreshKey={refreshKey} />
 
       {error ? (
         <ErrorState error={error as ApiError} onRetry={() => setRefreshKey((k) => k + 1)} />
