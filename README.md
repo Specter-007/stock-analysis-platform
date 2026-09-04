@@ -1032,9 +1032,11 @@ cd backend
 venv\Scripts\python -m pytest -q
 ```
 
-**567 tests** in `backend/tests/` (510 unit/component + 41 real-network integration + 16 tests against
+**589 tests** in `backend/tests/` (531 unit/component + 41 real-network integration + 17 tests against
 a real, disposable PostgreSQL server - see [Production SaaS Foundation](#production-saas-foundation)
-and [docs/DATABASE.md](docs/DATABASE.md)) cover: ticker
+and [docs/DATABASE.md](docs/DATABASE.md)), plus **33 frontend tests** (Vitest + React Testing Library,
+`cd frontend && npm test`) covering the navigation header's responsive tiers, auth-state variations,
+and keyboard/dismissal behavior. The backend suite covers: ticker
 validation, every indicator calculation (SMA, EMA,
 RSI, MACD, Bollinger Bands, ATR, ROC, historical volatility, relative volume) plus the interpretation
 layer that turns them into UI text (regression-tested after a real bug where the Bollinger lower-band
@@ -1249,7 +1251,8 @@ Documented honestly rather than silently omitted:
   `pgserver` (a pip-installable disposable real PostgreSQL 16.2 binary; dev/test-only, see
   `backend/requirements-dev.txt`) to genuinely test schema creation, JSONB columns, FK cascades,
   unique constraints, transactions, the naive-UTC timestamp convention, multi-user isolation through
-  the real service layer, and two concurrency scenarios - 16 passing tests
+  the real service layer, and concurrency (including the real row-level
+  locking fix below) - 17 passing tests
   (`backend/tests/test_postgresql_real.py`). **Still not verified**: a real managed provider (RDS,
   Cloud SQL, Supabase, etc.) or a Docker-based Postgres, which may differ from this embedded build.
   See [docs/DATABASE.md](docs/DATABASE.md).
