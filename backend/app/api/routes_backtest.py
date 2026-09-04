@@ -3,7 +3,10 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+
+from app.rate_limit import limiter
+from app.settings import RATE_LIMIT_EXPENSIVE_RESEARCH
 
 from app.backtesting.cost_stress import run_cost_stress_test
 from app.backtesting.engine import BacktestResult, run_backtest
@@ -179,18 +182,19 @@ def post_walk_forward(request: WalkForwardRequest):
 
 
 @router.post("/backtest/monte-carlo", response_model=MonteCarloResponse)
-def post_monte_carlo(request: MonteCarloRequest):
-    ticker = normalize_and_validate_ticker(request.ticker)
+@limiter.limit(RATE_LIMIT_EXPENSIVE_RESEARCH)
+def post_monte_carlo(request: Request, body: MonteCarloRequest):
+    ticker = normalize_and_validate_ticker(body.ticker)
     full_df, meta = market_data.get_full_daily_history(ticker)
 
     backtest_result = run_backtest(
         ticker=ticker,
         full_price_df=full_df,
-        start_date=request.start_date,
-        end_date=request.end_date,
-        initial_capital=request.initial_capital,
-        transaction_cost_bps=request.transaction_cost_bps,
-        slippage_bps=request.slippage_bps,
+        start_date=body.start_date,
+        end_date=body.end_date,
+        initial_capital=body.initial_capital,
+        transaction_cost_bps=body.transaction_cost_bps,
+        slippage_bps=body.slippage_bps,
     )
 
     equity_series = pd.Series(
@@ -201,10 +205,10 @@ def post_monte_carlo(request: MonteCarloRequest):
     mc_result = run_monte_carlo(
         trades=backtest_result.trades,
         daily_returns=daily_returns,
-        initial_capital=request.initial_capital,
-        num_simulations=request.simulations,
-        seed=request.seed,
-        drawdown_threshold_percent=request.drawdown_threshold_percent,
+        initial_capital=body.initial_capital,
+        num_simulations=body.simulations,
+        seed=body.seed,
+        drawdown_threshold_percent=body.drawdown_threshold_percent,
         trading_days_in_period=backtest_result.trading_days,
     )
 
@@ -261,12 +265,13 @@ def post_cost_stress(request: CostStressRequest):
 
 
 @router.post("/backtest/sensitivity", response_model=SensitivityResponse)
-def post_sensitivity(request: SensitivityRequest):
-    ticker = normalize_and_validate_ticker(request.ticker)
+@limiter.limit(RATE_LIMIT_EXPENSIVE_RESEARCH)
+def post_sensitivity(request: Request, body: SensitivityRequest):
+    ticker = normalize_and_validate_ticker(body.ticker)
     full_df, meta = market_data.get_full_daily_history(ticker)
 
-    if request.parameters:
-        requested = tuple(p for p in request.parameters if p in ALL_PARAMETERS)
+    if body.parameters:
+        requested = tuple(p for p in body.parameters if p in ALL_PARAMETERS)
         parameters = requested or THRESHOLD_PARAMETERS
     else:
         parameters = THRESHOLD_PARAMETERS
@@ -274,12 +279,12 @@ def post_sensitivity(request: SensitivityRequest):
     result = run_sensitivity_analysis(
         ticker=ticker,
         full_price_df=full_df,
-        start_date=request.start_date,
-        end_date=request.end_date,
-        initial_capital=request.initial_capital,
-        transaction_cost_bps=request.transaction_cost_bps,
-        slippage_bps=request.slippage_bps,
-        model_version=request.model_version,
+        start_date=body.start_date,
+        end_date=body.end_date,
+        initial_capital=body.initial_capital,
+        transaction_cost_bps=body.transaction_cost_bps,
+        slippage_bps=body.slippage_bps,
+        model_version=body.model_version,
         parameters=parameters,
     )
 
@@ -308,11 +313,12 @@ def post_sensitivity(request: SensitivityRequest):
 
 
 @router.post("/backtest/sensitivity/heatmap", response_model=SensitivityHeatmapResponse)
-def post_sensitivity_heatmap(request: SensitivityHeatmapRequest):
-    ticker = normalize_and_validate_ticker(request.ticker)
+@limiter.limit(RATE_LIMIT_EXPENSIVE_RESEARCH)
+def post_sensitivity_heatmap(request: Request, body: SensitivityHeatmapRequest):
+    ticker = normalize_and_validate_ticker(body.ticker)
     full_df, meta = market_data.get_full_daily_history(ticker)
 
-    if request.param_x not in ALL_PARAMETERS or request.param_y not in ALL_PARAMETERS:
+    if body.param_x not in ALL_PARAMETERS or body.param_y not in ALL_PARAMETERS:
         raise HTTPException(
             status_code=422,
             detail=f"param_x and param_y must both be one of: {', '.join(ALL_PARAMETERS)}",
@@ -321,15 +327,15 @@ def post_sensitivity_heatmap(request: SensitivityHeatmapRequest):
     result = run_sensitivity_heatmap(
         ticker=ticker,
         full_price_df=full_df,
-        start_date=request.start_date,
-        end_date=request.end_date,
-        initial_capital=request.initial_capital,
-        transaction_cost_bps=request.transaction_cost_bps,
-        slippage_bps=request.slippage_bps,
-        param_x=request.param_x,
-        param_y=request.param_y,
-        metric=request.metric,
-        model_version=request.model_version,
+        start_date=body.start_date,
+        end_date=body.end_date,
+        initial_capital=body.initial_capital,
+        transaction_cost_bps=body.transaction_cost_bps,
+        slippage_bps=body.slippage_bps,
+        param_x=body.param_x,
+        param_y=body.param_y,
+        metric=body.metric,
+        model_version=body.model_version,
     )
 
     return SensitivityHeatmapResponse(
@@ -373,13 +379,14 @@ def post_out_of_sample(request: OutOfSampleRequest):
 
 
 @router.post("/backtest/portfolio", response_model=PortfolioBacktestResponse)
-def post_portfolio_backtest(request: PortfolioBacktestRequest):
-    tickers = [normalize_and_validate_ticker(t) for t in request.tickers]
+@limiter.limit(RATE_LIMIT_EXPENSIVE_RESEARCH)
+def post_portfolio_backtest(request: Request, body: PortfolioBacktestRequest):
+    tickers = [normalize_and_validate_ticker(t) for t in body.tickers]
     if len(set(tickers)) != len(tickers):
         raise HTTPException(status_code=422, detail="Duplicate tickers are not allowed.")
-    if request.allocation_method not in ALLOCATION_METHODS:
+    if body.allocation_method not in ALLOCATION_METHODS:
         raise HTTPException(status_code=422, detail=f"allocation_method must be one of: {', '.join(ALLOCATION_METHODS)}")
-    if request.rebalance_frequency not in REBALANCE_FREQUENCIES:
+    if body.rebalance_frequency not in REBALANCE_FREQUENCIES:
         raise HTTPException(status_code=422, detail=f"rebalance_frequency must be one of: {', '.join(REBALANCE_FREQUENCIES)}")
 
     with ThreadPoolExecutor(max_workers=min(8, len(tickers))) as pool:
@@ -388,28 +395,28 @@ def post_portfolio_backtest(request: PortfolioBacktestRequest):
     meta = fetch_results[0][1]
 
     benchmark_df = None
-    if request.benchmark_ticker:
+    if body.benchmark_ticker:
         try:
-            benchmark_df, _ = market_data.get_full_daily_history(request.benchmark_ticker)
+            benchmark_df, _ = market_data.get_full_daily_history(body.benchmark_ticker)
         except Exception:
             benchmark_df = None
 
-    constraints = PortfolioConstraints(**request.constraints.model_dump())
+    constraints = PortfolioConstraints(**body.constraints.model_dump())
 
     result = run_portfolio_backtest(
         tickers=tickers,
         price_data=price_data,
-        start_date=request.start_date,
-        end_date=request.end_date,
-        initial_capital=request.initial_capital,
-        transaction_cost_bps=request.transaction_cost_bps,
-        slippage_bps=request.slippage_bps,
-        allocation_method=request.allocation_method,
-        rebalance_frequency=request.rebalance_frequency,
+        start_date=body.start_date,
+        end_date=body.end_date,
+        initial_capital=body.initial_capital,
+        transaction_cost_bps=body.transaction_cost_bps,
+        slippage_bps=body.slippage_bps,
+        allocation_method=body.allocation_method,
+        rebalance_frequency=body.rebalance_frequency,
         constraints=constraints,
-        fixed_weights=request.fixed_weights,
-        model_version=request.model_version,
-        benchmark_ticker=request.benchmark_ticker,
+        fixed_weights=body.fixed_weights,
+        model_version=body.model_version,
+        benchmark_ticker=body.benchmark_ticker,
         benchmark_price_df=benchmark_df,
     )
 

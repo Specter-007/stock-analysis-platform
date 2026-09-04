@@ -9,13 +9,29 @@ phase - watchlists, paper-trading portfolios, and experiments were plain
 JSON files on disk (see [MIGRATION.md](MIGRATION.md) for how that data was
 imported).
 
-**Honesty note:** this development environment does not have a PostgreSQL
-server installed. Every model, migration, and test in this codebase is
-written to be dialect-portable and has been verified against **SQLite**
-here (see `backend/app/db/base.py`) - the schema itself has *not* been
-run against a real PostgreSQL instance in this environment. Before
-production use: install PostgreSQL, set `DATABASE_URL` accordingly, run
-`alembic upgrade head` against it, and re-run the test suite pointed at it.
+**Honesty note - updated after real PostgreSQL validation:** this
+development environment has no system-installed PostgreSQL server and no
+Docker either. Real PostgreSQL validation was still performed - not
+skipped - using [`pgserver`](https://pypi.org/project/pgserver/), a
+pip-installable package bundling a genuine, disposable PostgreSQL 16.2
+server binary (no system install, no admin rights, no Docker required;
+see `backend/requirements-dev.txt` and
+`backend/tests/test_postgresql_real.py`, 16 tests). Verified for real: a
+fresh `alembic upgrade head` from an empty database, `downgrade base` then
+re-`upgrade head`, every table/JSONB-column/foreign-key/unique-constraint
+matching the intended schema, cascade deletes (both raw ORM and through
+the actual `app.auth.service` code), transaction rollback, the naive-UTC
+timestamp convention *not* silently becoming timezone-aware, multi-user
+ownership isolation through the real service layer, and two concurrency
+scenarios (a second session seeing a first session's committed write, and
+a duplicate-slug race being rejected by the unique constraint rather than
+silently lost). Two real Windows-specific bugs were found and fixed while
+building this validation - see that test file's module docstring.
+**Still not verified:** a real managed PostgreSQL provider (RDS, Cloud
+SQL, Supabase, etc.) or a Docker-based Postgres, which may differ in
+configuration defaults from this embedded build - re-run `alembic upgrade
+head` plus the application's test suite against your actual production
+target before launch.
 
 ## Connection configuration
 

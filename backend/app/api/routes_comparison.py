@@ -1,18 +1,21 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from app.comparison.service import compare_stocks
 from app.models.schemas import ComparisonRequest, ComparisonResponse, ComparisonRowModel
+from app.rate_limit import limiter
+from app.settings import RATE_LIMIT_EXPENSIVE_RESEARCH
 from app.utils.validation import normalize_and_validate_ticker
 
 router = APIRouter(prefix="/api", tags=["comparison"])
 
 
 @router.post("/compare", response_model=ComparisonResponse)
-def post_compare(request: ComparisonRequest):
-    tickers = [normalize_and_validate_ticker(t) for t in request.tickers]
-    benchmark = normalize_and_validate_ticker(request.benchmark_ticker)
+@limiter.limit(RATE_LIMIT_EXPENSIVE_RESEARCH)
+def post_compare(request: Request, body: ComparisonRequest):
+    tickers = [normalize_and_validate_ticker(t) for t in body.tickers]
+    benchmark = normalize_and_validate_ticker(body.benchmark_ticker)
 
     try:
         result = compare_stocks(tickers, benchmark_ticker=benchmark)

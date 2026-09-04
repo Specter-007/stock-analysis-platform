@@ -102,7 +102,8 @@ def confirm_password_reset(body: PasswordResetConfirmRequest, db: Session = Depe
 
 
 @router.post("/email-verification/request", response_model=MessageResponse)
-def request_email_verification(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@limiter.limit(RATE_LIMIT_PASSWORD_RESET)
+def request_email_verification(request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     auth_service.request_email_verification(db, user)
     return MessageResponse(message="A verification link has been sent to your email address.")
 

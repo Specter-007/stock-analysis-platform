@@ -45,3 +45,8 @@ def save_tickers(db: Session, user_id: str, watchlist_id: str, tickers: list[str
 def list_watchlist_slugs(db: Session, user_id: str) -> list[str]:
     rows = db.query(WatchlistDB.slug).filter_by(user_id=user_id).order_by(WatchlistDB.slug).all()
     return [r[0] for r in rows]
+
+
+def list_all_watchlists(db: Session, user_id: str) -> list[WatchlistDB]:
+    """Full rows (not just slugs) - used by the account data-export endpoint."""
+    return list(db.query(WatchlistDB).filter_by(user_id=user_id).order_by(WatchlistDB.slug).all())

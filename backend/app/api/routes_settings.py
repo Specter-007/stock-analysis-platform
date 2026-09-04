@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user, require_csrf
+from app.data_export.service import export_user_data
 from app.db.base import get_db
 from app.models_db.user import User
 from app.preferences import service
@@ -49,3 +53,21 @@ def complete_onboarding(
 ):
     prefs = service.complete_onboarding(db, user.id)
     return _to_response(prefs)
+
+
+@router.get("/export")
+def export_my_data(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Structured JSON export of everything this endpoint's caller owns -
+    profile, preferences, watchlists, paper portfolios (incl. trades and
+    equity snapshots), experiments, notifications, and support requests.
+    Never includes the password hash, session/CSRF/reset-token secrets, or
+    any other user's data. Providing this export does not by itself imply
+    GDPR/KVKK compliance - see docs/SECURITY.md.
+    """
+    payload = export_user_data(db, user)
+    body = json.dumps(payload, indent=2)
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="account-export-{user.id}.json"'},
+    )

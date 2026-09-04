@@ -10,6 +10,7 @@ const TABS = [
   { href: "/settings/security", label: "Security" },
   { href: "/settings/preferences", label: "Preferences" },
   { href: "/settings/notifications", label: "Notifications" },
+  { href: "/settings/privacy", label: "Privacy" },
 ];
 
 function SettingsShell({ children }: { children: React.ReactNode }) {

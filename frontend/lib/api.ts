@@ -530,6 +530,10 @@ export function completeOnboarding() {
   return apiFetch<Preferences>("/api/settings/onboarding/complete", { method: "POST" });
 }
 
+export function getAccountExportUrl(): string {
+  return `${API_BASE_URL}/api/settings/export`;
+}
+
 // -------------------------------------------------------- Notifications
 
 export function listNotifications(unreadOnly = false, signal?: AbortSignal) {

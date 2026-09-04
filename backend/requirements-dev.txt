@@ -1,0 +1,13 @@
+# Development/test-only dependencies - never required in production and
+# never installed by production deployment instructions (see
+# docs/DEPLOYMENT.md). Install with: pip install -r requirements-dev.txt
+
+-r requirements.txt
+
+# Disposable, pip-installable real PostgreSQL server binary (no system
+# install, no admin rights, no Docker) used ONLY by
+# tests/test_postgresql_real.py to genuinely validate the SQLAlchemy
+# models/Alembic migrations against real PostgreSQL rather than SQLite.
+# That test skips itself cleanly (reports "NOT VERIFIED", never faked) if
+# this package is not installed - see docs/DATABASE.md.
+pgserver==0.1.4

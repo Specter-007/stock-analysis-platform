@@ -78,3 +78,8 @@ def list_portfolio_ids(db: Session, user_id: str) -> list[str]:
     approach (see the V5 changelog) but now naturally per-user."""
     rows = db.query(PaperPortfolioDB.slug).filter_by(user_id=user_id).order_by(PaperPortfolioDB.slug).all()
     return [r[0] for r in rows]
+
+
+def list_all_portfolios(db: Session, user_id: str) -> list[PaperPortfolioDB]:
+    """Full rows (not just slugs) - used by the account data-export endpoint."""
+    return list(db.query(PaperPortfolioDB).filter_by(user_id=user_id).order_by(PaperPortfolioDB.slug).all())

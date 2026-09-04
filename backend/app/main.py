@@ -22,6 +22,7 @@ from app.api.routes_settings import router as settings_router
 from app.api.routes_stock import router as stock_router
 from app.api.routes_support import router as support_router
 from app.api.routes_watchlist import router as watchlist_router
+from app.body_size_limit import BodySizeLimitMiddleware
 from app.config import MODEL_VERSION_CURRENT
 from app.db.base import get_db
 from app.rate_limit import limiter
@@ -45,6 +46,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(BodySizeLimitMiddleware)
 
 # CORS_ALLOWED_ORIGINS is validated at import time (app.settings) to never be
 # "*" when APP_ENV=production and credentials are allowed - a wildcard origin
