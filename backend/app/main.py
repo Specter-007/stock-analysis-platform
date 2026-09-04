@@ -1,5 +1,6 @@
 import logging
 import os
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +14,7 @@ from app.api.routes_model import router as model_router
 from app.api.routes_paper_trading import router as paper_trading_router
 from app.api.routes_stock import router as stock_router
 from app.api.routes_watchlist import router as watchlist_router
-from app.config import MODEL_VERSION_CURRENT
+from app.config import EXPERIMENTS_DATA_DIR, MODEL_VERSION_CURRENT, PAPER_TRADING_DATA_DIR
 from app.utils.logging_config import configure_logging
 
 configure_logging(logging.INFO)
@@ -53,4 +54,31 @@ app.include_router(experiments_router)
 
 @app.get("/api/health", tags=["meta"])
 def health_check():
-    return {"status": "ok"}
+    """Deliberately cheap: checks that each JSON data directory is
+    writable (a real, near-instant filesystem check), never a live Yahoo
+    Finance call - a health check that depends on an external network
+    call would make an unrelated outage look like this service is down.
+    """
+    persistence: dict[str, str] = {}
+    for name, data_dir in (
+        ("paper_trading", PAPER_TRADING_DATA_DIR),
+        ("watchlists", "data/watchlists"),
+        ("experiments", EXPERIMENTS_DATA_DIR),
+    ):
+        try:
+            path = Path(data_dir)
+            path.mkdir(parents=True, exist_ok=True)
+            probe = path / ".health_probe"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+            persistence[name] = "ok"
+        except OSError as exc:
+            persistence[name] = f"error: {exc}"
+
+    overall = "ok" if all(v == "ok" for v in persistence.values()) else "degraded"
+    return {
+        "status": overall,
+        "model_version": MODEL_VERSION_CURRENT,
+        "persistence": persistence,
+        "data_service": "not checked (health checks never call Yahoo Finance - see DATA_UNAVAILABLE handling on data endpoints instead)",
+    }

@@ -77,7 +77,11 @@ def client(monkeypatch):
 def test_health_check(client):
     resp = client.get("/api/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    body = resp.json()
+    # V5: the health response was expanded to report per-store persistence
+    # status (see tests/test_v5_health.py) - this test only checks the
+    # original minimal contract still holds.
+    assert body["status"] == "ok"
 
 
 def test_stock_overview_response_shape(client):
