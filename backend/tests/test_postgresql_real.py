@@ -36,9 +36,11 @@ calling `pgserver.get_server()`.
 """
 from __future__ import annotations
 
+import queue
 import shutil
 import socket
 import subprocess
+import threading
 import uuid
 from pathlib import Path
 
@@ -453,6 +455,76 @@ def test_duplicate_slug_race_is_rejected_not_silently_lost(pg_session):
         session_2.rollback()
 
         assert pg_session.query(WatchlistDB).filter_by(user_id=user.id, slug="race").count() == 1
+    finally:
+        session_1.close()
+        session_2.close()
+
+
+def test_paper_portfolio_for_update_lock_serializes_concurrent_read_modify_write(pg_session):
+    """Regression test for the documented paper-trading equity-snapshot/
+    trade race (see docs/SECURITY.md): two concurrent read-modify-write
+    cycles on the SAME portfolio row (e.g. two browser tabs, or a page load
+    racing a trade) used to be able to silently lose one side's write,
+    since the whole state lived in one JSON column with a plain SELECT
+    (last commit wins, no error, no warning). app.paper_trading.store now
+    takes a real row-level lock (`for_update=True`) for exactly this
+    read-modify-write shape.
+
+    This proves the lock actually serializes access on real PostgreSQL
+    (not just "the API looks right") by holding it open in one session
+    while a second session's equivalent locked read blocks - the classic,
+    unambiguous way to prove SELECT ... FOR UPDATE is doing something, as
+    opposed to merely not raising an error.
+    """
+    from app.models_db.paper_trading import PaperPortfolioDB
+    from app.paper_trading.store import load_portfolio, save_portfolio
+
+    user = _make_user(pg_session)
+    pg_session.add(PaperPortfolioDB(user_id=user.id, slug="default", state={"cash": 10000, "trades": []}))
+    pg_session.commit()
+
+    engine = pg_session.get_bind()
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+
+    session_1 = SessionLocal()
+    session_2 = SessionLocal()
+    result: queue.Queue = queue.Queue()
+    session_2_started = threading.Event()
+
+    def _session_2_locked_read():
+        session_2_started.set()
+        state = load_portfolio(session_2, user.id, "default", for_update=True)
+        result.put(state)
+        session_2.commit()
+
+    try:
+        # session_1 acquires the lock and holds it (does not commit yet).
+        state_1 = load_portfolio(session_1, user.id, "default", for_update=True)
+        assert state_1["trades"] == []
+
+        # session_2's equivalent locked read must now block behind session_1.
+        t = threading.Thread(target=_session_2_locked_read)
+        t.start()
+        session_2_started.wait(timeout=5)
+        try:
+            blocked_result = result.get(timeout=1.5)
+        except queue.Empty:
+            blocked_result = "still-blocked"
+        assert blocked_result == "still-blocked", (
+            "session_2's SELECT ... FOR UPDATE returned before session_1 committed - "
+            "the row lock is not actually serializing access."
+        )
+
+        # session_1 makes its change and commits, releasing the lock.
+        state_1["trades"].append({"action": "BUY", "ticker": "AAPL"})
+        save_portfolio(session_1, user.id, "default", state_1)
+
+        # Now session_2's blocked read must complete, and see session_1's
+        # committed write - not the stale pre-lock snapshot it would have
+        # read had it not actually been blocked.
+        state_2 = result.get(timeout=5)
+        t.join(timeout=5)
+        assert state_2["trades"] == [{"action": "BUY", "ticker": "AAPL"}]
     finally:
         session_1.close()
         session_2.close()

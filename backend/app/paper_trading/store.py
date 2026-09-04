@@ -44,13 +44,26 @@ def _default_state(portfolio_id: str) -> dict:
     }
 
 
-def _get_row(db: Session, user_id: str, portfolio_id: str) -> PaperPortfolioDB | None:
+def _get_row(db: Session, user_id: str, portfolio_id: str, *, for_update: bool = False) -> PaperPortfolioDB | None:
     slug = _sanitize_slug(portfolio_id)
-    return db.query(PaperPortfolioDB).filter_by(user_id=user_id, slug=slug).one_or_none()
+    query = db.query(PaperPortfolioDB).filter_by(user_id=user_id, slug=slug)
+    if for_update:
+        # Row-level lock (SELECT ... FOR UPDATE on PostgreSQL; a documented
+        # no-op on SQLite, which serializes writes at the whole-database
+        # level instead - safe either way). Held until this transaction
+        # commits (i.e. until the paired save_portfolio() call below), so a
+        # second concurrent read-modify-write cycle for the SAME row blocks
+        # until the first one finishes, then sees its committed result -
+        # closing the equity-snapshot/trade race documented in
+        # docs/SECURITY.md without any schema change. Only used by callers
+        # that are about to save_portfolio() afterward - a pure read (e.g.
+        # get_equity_history's display read) must not lock.
+        query = query.with_for_update()
+    return query.one_or_none()
 
 
-def load_portfolio(db: Session, user_id: str, portfolio_id: str) -> dict:
-    row = _get_row(db, user_id, portfolio_id)
+def load_portfolio(db: Session, user_id: str, portfolio_id: str, *, for_update: bool = False) -> dict:
+    row = _get_row(db, user_id, portfolio_id, for_update=for_update)
     return dict(row.state) if row is not None else _default_state(portfolio_id)
 
 

@@ -1253,15 +1253,15 @@ Documented honestly rather than silently omitted:
   (`backend/tests/test_postgresql_real.py`). **Still not verified**: a real managed provider (RDS,
   Cloud SQL, Supabase, etc.) or a Docker-based Postgres, which may differ from this embedded build.
   See [docs/DATABASE.md](docs/DATABASE.md).
-- **Rate limiting is per-process** (`slowapi`'s in-memory store) - correct for a single instance,
-  not yet suitable for a horizontally-scaled multi-instance deployment without adding a shared
-  store. See [docs/SECURITY.md](docs/SECURITY.md#rate-limiting).
-- **A narrow paper-trading concurrency race is documented, not fixed**: two genuinely simultaneous
-  requests for the *same* portfolio on the *same* day (e.g. one user with two open tabs) could in
-  principle both record a snapshot for that day, since snapshots live in a JSON array inside one row
-  rather than a separate table with its own uniqueness constraint. Low severity (a user can only race
-  themselves), and fixing it correctly would require a schema change beyond this hardening pass's
-  scope - see [docs/SECURITY.md](docs/SECURITY.md#real-postgresql-concurrency-findings).
+- **Rate limiting is per-process** (`slowapi`'s in-memory store) by default - correct for a single
+  instance. Set `RATE_LIMIT_STORAGE_URL` to a `redis://` URL to share limit state across multiple
+  processes/instances; falls back to per-process limiting if that backend is unreachable rather than
+  failing requests. See [docs/SECURITY.md](docs/SECURITY.md#rate-limiting).
+- **The paper-trading concurrency race is fixed**, not just documented: a real row-level lock
+  (`SELECT ... FOR UPDATE` on PostgreSQL) now serializes concurrent read-modify-write cycles on the
+  same portfolio row, proven against a real PostgreSQL server to actually block a second concurrent
+  session rather than merely not error. See
+  [docs/SECURITY.md](docs/SECURITY.md#real-postgresql-concurrency-findings).
 - **No automated backup system is configured.** [docs/DATABASE.md](docs/DATABASE.md) documents the
   `pg_dump`/`pg_restore` mechanics; nothing runs them on a schedule.
 - **Legal pages are accurate but not lawyer-reviewed.** Each explicitly says so and should not be

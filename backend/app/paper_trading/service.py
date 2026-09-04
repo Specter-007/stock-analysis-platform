@@ -251,7 +251,10 @@ def _maybe_record_snapshot(portfolio_id: str, state: dict, view: PortfolioView) 
 
 def get_portfolio(db: Session, user_id: str, portfolio_id: str) -> PortfolioView:
     _apply_pending_exits(db, user_id, portfolio_id)
-    state = load_portfolio(db, user_id, portfolio_id)
+    # for_update=True: this read is immediately followed by a conditional
+    # save_portfolio() below - see the lock's docstring in
+    # app.paper_trading.store._get_row for why.
+    state = load_portfolio(db, user_id, portfolio_id, for_update=True)
     view = _build_view(state)
     if _maybe_record_snapshot(portfolio_id, state, view):
         save_portfolio(db, user_id, portfolio_id, state)
@@ -403,7 +406,7 @@ def _apply_pending_exits(db: Session, user_id: str, portfolio_id: str) -> None:
     every time the portfolio is loaded, so a trigger is caught on the next
     view rather than requiring a background process.
     """
-    state = load_portfolio(db, user_id, portfolio_id)
+    state = load_portfolio(db, user_id, portfolio_id, for_update=True)
     positions = state["positions"]
     changed = False
 
@@ -470,7 +473,7 @@ def execute_trade(
     if raw_price is None:
         raise TickerNotFoundError(ticker)
 
-    state = load_portfolio(db, user_id, portfolio_id)
+    state = load_portfolio(db, user_id, portfolio_id, for_update=True)
     positions = state["positions"]
 
     if action == "BUY":
@@ -567,7 +570,7 @@ def close_all_positions(db: Session, user_id: str, portfolio_id: str, exit_reaso
     example, to mark a research session's end without leaving positions
     open indefinitely."""
     _apply_pending_exits(db, user_id, portfolio_id)
-    state = load_portfolio(db, user_id, portfolio_id)
+    state = load_portfolio(db, user_id, portfolio_id, for_update=True)
     for ticker in list(state["positions"].keys()):
         price = _current_price(ticker)
         if price is None:

@@ -179,23 +179,55 @@ package's source, and not a substitute for a human security review.
 ## Real PostgreSQL concurrency findings
 
 `tests/test_postgresql_real.py` (see [DATABASE.md](DATABASE.md)) verified
-two concrete concurrency properties against a real PostgreSQL server: a
-second session correctly observes a first session's already-committed
-write (no stale-read/lost-update), and a duplicate-slug race between two
-sessions is rejected by the real unique constraint rather than silently
-creating two rows or overwriting one. One deliberately **not** fixed in
-this pass: paper-trading equity snapshots are appended to a JSON array
-inside a single `paper_portfolios.state` column (see
-[DATABASE.md](DATABASE.md)), not a separate table with its own unique
-constraint - two genuinely concurrent requests for the *same* portfolio on
-the *same* day (e.g. the same user with two browser tabs open) could in
-principle both pass the "not already recorded today" check before either
-commits, producing two snapshot entries for one day. This is a narrow,
-low-severity window (a single user racing themselves, not a security
-issue), not fixed here because doing so correctly would mean moving equity
-snapshots to their own table - a genuine schema change beyond this
-hardening pass's "do not rebuild the quant/persistence architecture"
-scope. Documented as a known limitation, not silently accepted.
+concrete concurrency properties against a real PostgreSQL server: a second
+session correctly observes a first session's already-committed write (no
+stale-read/lost-update), a duplicate-slug race between two sessions is
+rejected by the real unique constraint rather than silently creating two
+rows or overwriting one, and - see below - a genuine paper-trading race
+that a previous pass had documented as a known limitation rather than fixed.
+
+**Paper-trading read-modify-write race - fixed, not just documented.** A
+previous hardening pass found and documented (but did not fix) a real
+issue: the entire paper-trading portfolio state (cash, positions, trades,
+equity snapshots) lives in one `paper_portfolios.state` JSON column, and
+every mutating operation (executing a trade, auto-closing a position,
+recording today's equity snapshot) followed a plain read-modify-write
+cycle with no locking. Two genuinely concurrent requests for the *same*
+portfolio (e.g. the same user with two browser tabs open, or a page load
+racing an in-flight trade) could both read the same starting state, both
+compute a change, and then the second commit would silently overwrite the
+first's write in its entirety - not "two snapshot rows for one day" as
+originally characterized, but potentially a **fully lost trade or
+snapshot**, with no error raised anywhere.
+
+Re-examined this pass per the explicit instruction not to re-document the
+same limitation unexamined: a real fix was possible **without** the
+schema change the previous pass assumed was required. `app.paper_trading
+.store.load_portfolio(..., for_update=True)` now takes a real row-level
+lock (`SELECT ... FOR UPDATE` on PostgreSQL; a harmless no-op on SQLite,
+which serializes writes at the whole-database-file level instead) for
+every read that is followed by a save in the same request - a second
+concurrent read-modify-write cycle on the same row now blocks until the
+first commits, then correctly observes its result instead of racing it.
+Proven against a real PostgreSQL server (not just asserted) in
+`tests/test_paper_portfolio_for_update_lock_serializes_concurrent_read_modify_write`:
+one session holds the lock, a second session's equivalent locked read is
+shown to genuinely block (not merely "not error") until the first commits,
+and then correctly observes the committed write rather than a stale
+pre-lock snapshot. Verified this test fails (returns immediately instead
+of blocking) if `for_update=True` is removed, confirming it actually
+exercises the fix rather than passing regardless.
+
+Remaining, much narrower edge case: if the portfolio row does not exist
+yet (a brand-new portfolio's very first-ever request), there is nothing
+for `FOR UPDATE` to lock, so two simultaneous *first* requests could both
+attempt to `INSERT` - this fails loudly with a real unique-constraint
+`IntegrityError` on the loser (the same protection already verified in
+`test_duplicate_slug_race_is_rejected_not_silently_lost`), not a silent
+data loss. Left as-is: a failed request the user can retry is a
+categorically different (and far less severe) failure mode than the
+silent data loss this fix closes, and is already the same behavior every
+other user-owned resource in this app has for a first-write race.
 
 ## Known limitations (honest, not exhaustive)
 
@@ -209,8 +241,10 @@ scope. Documented as a known limitation, not silently accepted.
 - No Web Application Firewall, DDoS protection, or intrusion detection is
   configured - these are typically reverse-proxy/CDN/hosting-provider
   concerns outside this application's own codebase.
-- PostgreSQL itself (as opposed to the SQLAlchemy models targeting it) has
-  not been verified in this development environment - see
-  [DATABASE.md](DATABASE.md).
+- Real PostgreSQL (schema, constraints, concurrency behavior) has been
+  verified via a genuine disposable server in this development
+  environment (see "Real PostgreSQL concurrency findings" above and
+  [DATABASE.md](DATABASE.md)) - a real *managed* provider instance (Neon
+  or otherwise) has not been, and may differ in configuration defaults.
 - This document has not been reviewed by a third-party security
   professional.
