@@ -5,6 +5,7 @@ import TopNav from "@/components/nav/TopNav";
 import SiteFooter from "@/components/nav/SiteFooter";
 import { AuthProvider } from "@/lib/auth-context";
 import { CookieConsentBanner } from "@/components/legal/CookieConsentBanner";
+import { SITE_URL } from "@/lib/site";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -19,9 +20,18 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "Stock Analyst — Quantitative Research Terminal",
   description:
     "Deterministic, rules-based stock research and technical analysis, powered by real Yahoo Finance market data. Not a financial adviser.",
+  openGraph: {
+    title: "Stock Analyst — Quantitative Research Terminal",
+    description:
+      "Deterministic, rules-based stock research and technical analysis, powered by real Yahoo Finance market data. Not a financial adviser.",
+    url: SITE_URL,
+    siteName: "Stock Analyst",
+    type: "website",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
