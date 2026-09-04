@@ -33,6 +33,16 @@ statistical correction.
 > does not predict the future, and is not a substitute for professional financial advice. See
 > [Financial Disclaimer](#financial-disclaimer).
 
+As of this phase, the platform is also a **production multi-user SaaS application**: real
+authentication (Argon2id password hashing, httpOnly cookie sessions, CSRF protection), PostgreSQL
+persistence (via SQLAlchemy + Alembic - see [docs/DATABASE.md](docs/DATABASE.md)) with every
+watchlist/paper-portfolio/experiment scoped and enforced server-side to its owning account (see
+[docs/SECURITY.md](docs/SECURITY.md) for the IDOR-prevention pattern and its dedicated test suite),
+account settings, onboarding, real-event notifications, a command palette, legal/documentation/
+support pages, rate limiting, and security headers - see
+[Production SaaS Foundation](#production-saas-foundation) below. Billing, broker integration, and
+any LLM in the signal-generation/quant-analysis logic remain explicitly out of scope, by design.
+
 ---
 
 ## Table of Contents
@@ -45,41 +55,42 @@ statistical correction.
 6. [Running the Backend](#running-the-backend)
 7. [Running the Frontend](#running-the-frontend)
 8. [Environment Variables](#environment-variables)
-9. [API Reference](#api-reference)
-10. [Signal Methodology](#signal-methodology)
-11. [Model Versioning](#model-versioning)
-12. [Indicator Definitions](#indicator-definitions)
-13. [Confidence Methodology](#confidence-methodology)
-14. [Signal History, Stability & Change Detection](#signal-history-stability--change-detection)
-15. [Signal Performance Analytics](#signal-performance-analytics)
-16. [Market Regime, Relative Strength & Sector Comparison](#market-regime-relative-strength--sector-comparison)
-17. [Regime-Conditioned Performance](#regime-conditioned-performance)
-18. [Fundamental Analysis & Optional Fundamental Score](#fundamental-analysis--optional-fundamental-score)
-19. [Backtesting Methodology](#backtesting-methodology)
-20. [Model Evaluation Metrics](#model-evaluation-metrics)
-21. [Out-of-Sample Validation](#out-of-sample-validation)
-22. [Parameter Sensitivity & Robustness](#parameter-sensitivity--robustness)
-23. [Walk-Forward Analysis](#walk-forward-analysis)
-24. [Monte Carlo Robustness](#monte-carlo-robustness)
-25. [Transaction-Cost & Slippage Stress Testing](#transaction-cost--slippage-stress-testing)
-26. [Data Quality Layer](#data-quality-layer)
-27. [Watchlist](#watchlist)
-28. [Paper Trading](#paper-trading)
-29. [Forward Validation (Paper Trading ≠ Backtesting)](#forward-validation-paper-trading--backtesting)
-30. [Multi-Simulation](#multi-simulation)
-31. [Portfolio Backtesting](#portfolio-backtesting)
-32. [Stock Comparison](#stock-comparison)
-33. [Model Scorecard & Model-vs-Model Comparison](#model-scorecard--model-vs-model-comparison)
-34. [Model Drift Monitoring](#model-drift-monitoring)
-35. [Experiment Lab & Research History](#experiment-lab--research-history)
-36. [No-Look-Ahead-Bias Guarantee](#no-look-ahead-bias-guarantee)
-37. [Data Freshness & Status Labels](#data-freshness--status-labels)
-38. [yfinance / Yahoo Finance Limitations](#yfinance--yahoo-finance-limitations)
-39. [Financial Disclaimer](#financial-disclaimer)
-40. [Testing](#testing)
-41. [Deployment Considerations](#deployment-considerations)
-42. [GitHub Setup](#github-setup)
-43. [Known Limitations & Remaining Work](#known-limitations--remaining-work)
+9. [Production SaaS Foundation](#production-saas-foundation)
+10. [API Reference](#api-reference)
+11. [Signal Methodology](#signal-methodology)
+12. [Model Versioning](#model-versioning)
+13. [Indicator Definitions](#indicator-definitions)
+14. [Confidence Methodology](#confidence-methodology)
+15. [Signal History, Stability & Change Detection](#signal-history-stability--change-detection)
+16. [Signal Performance Analytics](#signal-performance-analytics)
+17. [Market Regime, Relative Strength & Sector Comparison](#market-regime-relative-strength--sector-comparison)
+18. [Regime-Conditioned Performance](#regime-conditioned-performance)
+19. [Fundamental Analysis & Optional Fundamental Score](#fundamental-analysis--optional-fundamental-score)
+20. [Backtesting Methodology](#backtesting-methodology)
+21. [Model Evaluation Metrics](#model-evaluation-metrics)
+22. [Out-of-Sample Validation](#out-of-sample-validation)
+23. [Parameter Sensitivity & Robustness](#parameter-sensitivity--robustness)
+24. [Walk-Forward Analysis](#walk-forward-analysis)
+25. [Monte Carlo Robustness](#monte-carlo-robustness)
+26. [Transaction-Cost & Slippage Stress Testing](#transaction-cost--slippage-stress-testing)
+27. [Data Quality Layer](#data-quality-layer)
+28. [Watchlist](#watchlist)
+29. [Paper Trading](#paper-trading)
+30. [Forward Validation (Paper Trading ≠ Backtesting)](#forward-validation-paper-trading--backtesting)
+31. [Multi-Simulation](#multi-simulation)
+32. [Portfolio Backtesting](#portfolio-backtesting)
+33. [Stock Comparison](#stock-comparison)
+34. [Model Scorecard & Model-vs-Model Comparison](#model-scorecard--model-vs-model-comparison)
+35. [Model Drift Monitoring](#model-drift-monitoring)
+36. [Experiment Lab & Research History](#experiment-lab--research-history)
+37. [No-Look-Ahead-Bias Guarantee](#no-look-ahead-bias-guarantee)
+38. [Data Freshness & Status Labels](#data-freshness--status-labels)
+39. [yfinance / Yahoo Finance Limitations](#yfinance--yahoo-finance-limitations)
+40. [Financial Disclaimer](#financial-disclaimer)
+41. [Testing](#testing)
+42. [Deployment Considerations](#deployment-considerations)
+43. [GitHub Setup](#github-setup)
+44. [Known Limitations & Remaining Work](#known-limitations--remaining-work)
 
 ---
 
@@ -252,6 +263,54 @@ The app is now at `http://localhost:3000`. It expects the backend at the URL con
 | Variable | Default | Purpose |
 |---|---|---|
 | `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8000` | Base URL of the FastAPI backend |
+
+See `backend/.env.example` for the complete list added by the Production SaaS Foundation
+(`APP_ENV`, `DATABASE_URL`, `SESSION_SECRET`, `EMAIL_PROVIDER`/`SMTP_*`, `RATE_LIMIT_*`,
+`LEGACY_DATA_OWNER_EMAIL`) - each documented inline with its production requirement.
+
+## Production SaaS Foundation
+
+Everything below was added around the existing quant platform without changing its mathematical
+behavior - see [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md),
+[docs/SECURITY.md](docs/SECURITY.md), [docs/DATABASE.md](docs/DATABASE.md),
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), and
+[docs/MIGRATION.md](docs/MIGRATION.md) for full detail on each.
+
+- **Authentication:** email/password registration (Terms-of-Service acceptance required, marketing
+  consent separate and opt-in), Argon2id password hashing, login with a generic invalid-credential
+  error, logout, password reset and email verification via single-use expiring tokens, change
+  password/email, and real account deletion (hard delete, cascades to every owned row).
+- **Sessions:** httpOnly `SameSite=Lax` cookies (never a localStorage token), server-tracked and
+  individually revocable from Settings → Security, with "sign out of all other sessions."
+- **CSRF:** signed double-submit-cookie protection on every state-changing authenticated request.
+- **Database:** PostgreSQL via SQLAlchemy 2.x + Alembic (SQLite locally - no PostgreSQL server is
+  installed in this development environment; see docs/DATABASE.md for the honesty note on what has
+  and hasn't been verified). Watchlists, paper-trading portfolios, and experiments moved from
+  per-user-agnostic JSON files to user-owned, `user_id`-scoped tables with the exact same persisted
+  shapes, via `scripts/migrate_json_to_db.py` (backs up first, idempotent, verifies record counts).
+- **Authorization:** every user-owned resource is looked up by `(user_id, id-or-slug)` at the data
+  layer - never inferred from a client-supplied field - and a mismatch (wrong owner or nonexistent)
+  returns an identical 404, so an attacker can't distinguish "not yours" from "doesn't exist." See
+  `backend/tests/test_idor.py` (10 tests, two independently-authenticated clients sharing one
+  database) for the actual proof.
+- **Settings, onboarding, notifications:** `/settings/{account,security,preferences,notifications}`;
+  a skippable first-login onboarding flow; a notification bell fed only by real backend events
+  (an experiment completing/failing, a paper-trading stop-loss/take-profit/trailing-stop trigger) -
+  verified live in a real browser, never a fabricated notification.
+- **Command palette** (Ctrl/Cmd+K): page navigation plus live ticker search.
+- **Legal & docs:** real Privacy Policy, Terms of Service, Cookie Policy, and Financial Disclaimer
+  (each flagged as not yet reviewed by a lawyer), a `/docs` methodology page, and a `/contact` form
+  that works for both signed-in and anonymous visitors.
+- **Security hardening:** CORS restricted to explicit origins (refuses to start in production with a
+  wildcard or missing origin), CSP/X-Frame-Options/Permissions-Policy/HSTS response headers, rate
+  limiting on auth/password-reset/contact endpoints, and `/api/health` (pure liveness) vs.
+  `/api/health/ready` (a real database check) split so an external outage never masquerades as this
+  service being down.
+- **Minimal admin foundation:** backend-enforced `USER`/`ADMIN` role for basic account
+  activation/deactivation and support-ticket triage only - no broader dashboard.
+- **Explicitly not added:** billing/subscriptions, broker/live-trading integration, or an LLM
+  anywhere in the signal-generation or quant-analysis logic - all out of scope by design for this
+  phase, matching the same constraint the core platform has always had.
 
 ## API Reference
 
@@ -969,7 +1028,7 @@ cd backend
 venv\Scripts\python -m pytest -q
 ```
 
-**433 tests** in `backend/tests/` (392 unit/component + 41 real-network integration) cover: ticker
+**522 tests** in `backend/tests/` (481 unit/component + 41 real-network integration) cover: ticker
 validation, every indicator calculation (SMA, EMA,
 RSI, MACD, Bollinger Bands, ATR, ROC, historical volatility, relative volume) plus the interpretation
 layer that turns them into UI text (regression-tested after a real bug where the Bollinger lower-band
@@ -1038,6 +1097,32 @@ passing tests - because the *live backend process* serving the browser had not b
 that fix, a mismatch invisible to `pytest` (which re-imports fresh) and visible only by actually
 using the running application.
 
+**Production SaaS Foundation additions:** `test_db_models.py` (model constraints/cascades against
+an in-memory SQLite database mirroring the production schema), `test_auth.py` (28 tests -
+registration incl. required Terms acceptance, login with the identical generic error for
+wrong-password vs. unknown-email, logout, CSRF enforcement in all three states, the complete
+password-reset/email-verification/email-change flows including token expiry and single-use
+enforcement, session listing/revocation and cross-user isolation, account-deletion cascade, rate
+limiting), `test_idor.py` (10 **critical security tests**: two independently-authenticated clients
+sharing one database, proving User B can never GET/POST/PATCH/DELETE User A's watchlist, paper
+portfolio, or experiment, and that all three subsystems reject unauthenticated requests),
+`test_notifications.py` (10 tests including two real-event triggers - an experiment failure and a
+stop-loss auto-exit each verified to actually produce a notification row, plus IDOR protection),
+`test_settings_and_support.py` (13 tests), `test_admin.py` (5 tests), `test_migrate_json_to_db.py`
+(5 tests against synthetic JSON fixtures - this caught and fixed a real bug: the backup-directory
+timestamp only had second resolution, so two invocations within the same second collided),
+`test_settings_production_safety.py` (6 tests proving the app actually refuses to start under
+`APP_ENV=production` with an insecure session secret, missing/wildcard CORS origins, or incomplete
+SMTP config), and a rewritten `test_v5_health.py` for the liveness/readiness split. All ~90
+pre-existing watchlist/paper-trading/experiment tests were updated in place to the new
+`(db_session, user_id, ...)` call signature required by real per-user ownership at the data layer,
+not merely at the route - see [docs/SECURITY.md](docs/SECURITY.md).
+
+The JSON→PostgreSQL migration script was also run for real against this repository's own
+accumulated dev/test JSON data (2 watchlists, 5 paper-trading portfolios) and verified with matching
+source-file-count vs. imported-row-count on both a fresh run and a repeat run (no duplication) -
+see [docs/MIGRATION.md](docs/MIGRATION.md).
+
 **The most important test file is `tests/test_v3_no_look_ahead.py`**: rather than only proving
 indicators are unaffected by *truncating* future data (the older, weaker test), it directly proves
 that *mutating* future prices to a completely different, independently-generated path never changes
@@ -1052,7 +1137,11 @@ its heatmap), walk-forward, Monte Carlo (incl. the V5 probability statistics), c
 drift, watchlist, paper-trade, portfolio backtesting, stock comparison, the model scorecard,
 model-version comparison, a full create→run→reopen→duplicate→list→delete experiment lifecycle, the
 paper-portfolio listing, and backtest (incl. `advanced_metrics`) endpoints — and inspects the actual
-returned structure (not just HTTP 200). It auto-skips if no network access is available.
+returned structure (not just HTTP 200). It auto-skips if no network access is available. Since the
+Production SaaS Foundation phase, the suite registers (or logs into, on a repeat run) a real test
+account before exercising the now-auth-gated watchlist/paper-trading/experiment endpoints - proving
+the full auth + CSRF + per-user persistence stack works against real Yahoo Finance data, not just
+mocks.
 
 Two real bugs were found and fixed via real-data testing during this pass (both timezone-naive vs.
 timezone-aware datetime mismatches - real yfinance data is tz-aware, synthetic test fixtures were
@@ -1144,8 +1233,30 @@ Documented honestly rather than silently omitted:
 - **Model version registry / changelog** is not a dedicated feature - `GET /api/model` documents
   each supported version's methodology, but there is no structured changelog UI tracking exactly
   what changed between v1.0 and v1.1 beyond the prose `version_notes` already there.
-- The watchlist and paper-trading stores are single-user JSON files with no authentication - fine
-  for local/personal use, not suitable for multi-tenant deployment without adding a real user
-  system first.
 - Sector peer comparison covers a curated set of ~11 GICS-style sectors
   (`app.config.SECTOR_PEER_MAP`) - a ticker outside that map shows an explicit "unavailable" state.
+
+**Production SaaS Foundation limitations** (see the linked docs for full detail):
+
+- **PostgreSQL itself has not been verified in this development environment** - no PostgreSQL
+  server is installed here. Every model and migration is dialect-portable and has been verified
+  against SQLite; before production use, point `DATABASE_URL` at a real PostgreSQL instance and
+  re-run `alembic upgrade head` plus the test suite against it. See
+  [docs/DATABASE.md](docs/DATABASE.md).
+- **Rate limiting is per-process** (`slowapi`'s in-memory store) - correct for a single instance,
+  not yet suitable for a horizontally-scaled multi-instance deployment without adding a shared
+  store. See [docs/SECURITY.md](docs/SECURITY.md#rate-limiting).
+- **No automated backup system is configured.** [docs/DATABASE.md](docs/DATABASE.md) documents the
+  `pg_dump`/`pg_restore` mechanics; nothing runs them on a schedule.
+- **Legal pages are accurate but not lawyer-reviewed.** Each explicitly says so and should not be
+  treated as a compliance certification for GDPR, KVKK, or any other specific regime.
+- **The command palette's search covers page navigation and live ticker lookup only** - there is no
+  full-text search across a user's own experiment/watchlist names yet.
+- **User data export is not implemented** - the architecture (one owner per row, everything
+  queryable by `user_id`) supports adding it, but no `GET /api/settings/export` endpoint exists yet.
+- **No third-party security audit or penetration test has been performed.** The IDOR/CSRF/CORS/
+  rate-limiting/session-security tests in this repo are real and passing, but that is not a
+  substitute for independent review before a genuine production launch with real user data.
+- **Email delivery requires configuring a real SMTP provider** (`EMAIL_PROVIDER=smtp`) - by default
+  (`EMAIL_PROVIDER=console`) verification/reset/contact-confirmation emails are logged, not sent,
+  and every response that would mention email honestly reflects that.
