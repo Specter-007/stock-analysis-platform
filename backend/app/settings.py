@@ -68,6 +68,13 @@ RATE_LIMIT_AUTH = os.environ.get("RATE_LIMIT_AUTH", "5/minute")
 RATE_LIMIT_PASSWORD_RESET = os.environ.get("RATE_LIMIT_PASSWORD_RESET", "3/minute")
 RATE_LIMIT_CONTACT = os.environ.get("RATE_LIMIT_CONTACT", "3/minute")
 RATE_LIMIT_EXPENSIVE_RESEARCH = os.environ.get("RATE_LIMIT_EXPENSIVE_RESEARCH", "20/minute")
+# Optional shared storage backend (e.g. "redis://host:6379/0") so rate limits
+# are enforced across multiple backend processes/instances, not just within
+# one. Unset (default) uses in-memory storage - correct and sufficient for a
+# single-process/single-instance deployment, but each process then has its
+# own independent counters. Only set this if you are actually running more
+# than one backend process/instance - see docs/DEPLOYMENT.md.
+RATE_LIMIT_STORAGE_URL = os.environ.get("RATE_LIMIT_STORAGE_URL")
 
 # --- Legacy JSON -> Postgres migration ownership (see scripts/migrate_json_to_db.py) ---
 LEGACY_DATA_OWNER_EMAIL = os.environ.get("LEGACY_DATA_OWNER_EMAIL", "legacy-import@localhost")

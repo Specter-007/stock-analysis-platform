@@ -35,6 +35,7 @@ The ones that matter most for a production launch:
 | `SESSION_COOKIE_SECURE` | Forced on automatically in production; only relevant to override for local HTTPS testing. |
 | `FRONTEND_URL` / `BACKEND_URL` | Used to build links in emails (password reset, verification). |
 | `EMAIL_PROVIDER` | `smtp` plus `SMTP_HOST`/`SMTP_PORT`/`SMTP_USERNAME`/`SMTP_PASSWORD` if you want real email delivery; otherwise stays `console` and the app is honest about not having sent anything. |
+| `RATE_LIMIT_STORAGE_URL` | Optional. Only needed if you run more than one backend process/instance - set to a `redis://` URL to share rate-limit state across them. Unset means per-process in-memory limiting (correct for one instance). Falls back to per-process limiting automatically if the configured Redis is unreachable. |
 | `LEGACY_DATA_OWNER_EMAIL` | Only relevant if you run the JSON→Postgres migration (see [MIGRATION.md](MIGRATION.md)). |
 
 ## Start commands

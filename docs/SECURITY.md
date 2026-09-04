@@ -85,12 +85,19 @@ the README).
 - `/api/support` (the contact form) - `RATE_LIMIT_CONTACT` (default
   3/minute)
 
-**Documented limitation:** `slowapi`'s default storage is in-memory, so
-limits are per-process. A multi-process/multi-instance production
-deployment would need a shared store (e.g. Redis) for the limit to apply
-globally - not added here per the "don't introduce infrastructure the app
-doesn't otherwise need" instruction for this phase. Document this as a
-gap, not a solved problem, when planning a multi-instance deployment.
+`slowapi`'s default storage is in-memory, so limits are per-process unless
+`RATE_LIMIT_STORAGE_URL` is set to a `redis://` URL (see
+`app/rate_limit.py`), in which case limit state is shared across every
+backend process/instance pointed at the same Redis. This is opt-in, not
+required - a single-instance deployment is correct and sufficient with the
+default in-memory storage, and Redis was not introduced as a hard
+dependency just to have it available. If `RATE_LIMIT_STORAGE_URL` is set
+and that backend is or becomes unreachable, `in_memory_fallback_enabled`
+transparently falls back to per-process limiting rather than turning every
+request into a 500 - verified in
+`backend/tests/test_rate_limit_storage.py` by pointing the limiter at an
+address nothing listens on and confirming requests still succeed/429
+instead of erroring.
 
 Existing V4/V5 resource limits (max Monte Carlo simulations, max
 sensitivity parameter combinations, max tickers per portfolio backtest,
@@ -195,9 +202,10 @@ scope. Documented as a known limitation, not silently accepted.
 - No automated penetration test or third-party security audit has been
   performed - this document describes the controls implemented, not an
   independent verification of them.
-- Rate limiting is per-process (see above) - not yet suitable for a
-  horizontally-scaled multi-instance deployment without adding a shared
-  store.
+- Rate limiting is per-process unless `RATE_LIMIT_STORAGE_URL` is
+  explicitly configured (see above) - a horizontally-scaled deployment
+  must set it to a shared Redis instance or each process's limits apply
+  independently.
 - No Web Application Firewall, DDoS protection, or intrusion detection is
   configured - these are typically reverse-proxy/CDN/hosting-provider
   concerns outside this application's own codebase.
