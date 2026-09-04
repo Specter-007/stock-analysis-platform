@@ -45,3 +45,15 @@ backend/data/paper_trading/
 backend/data/watchlists/
 backend/data/experiments/
 
+# Local SQLite database (dev/test default - see app/db/base.py) and any
+# backup snapshots taken by the JSON->Postgres migration script. Never the
+# production database, which lives in a real PostgreSQL server.
+backend/data/*.db
+backend/data/*.db-journal
+backend/data/backups/
+
+# Environment secrets - never commit real values, only .env.example.
+.env
+backend/.env
+frontend/.env*.local
+

@@ -58,3 +58,35 @@ def ohlcv_downtrend():
 @pytest.fixture
 def ohlcv_high_volatility():
     return _make_ohlcv(400, seed=3, drift=0.0, vol=0.06)
+
+
+@pytest.fixture
+def db_session():
+    """An isolated, fresh in-memory SQLite database for a single test -
+    exercises the exact same SQLAlchemy models/constraints the production
+    PostgreSQL schema uses (see app/db/base.py for the portability notes).
+    """
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    import app.models_db  # noqa: F401  (registers every model on Base.metadata)
+    from app.db.base import Base
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "connect")
+    def _enable_fk(dbapi_connection, connection_record):  # noqa: ARG001
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    Base.metadata.create_all(bind=engine)
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = TestingSessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
