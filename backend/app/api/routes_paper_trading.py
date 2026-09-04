@@ -7,7 +7,9 @@ from app.models.schemas import (
     ForwardValidationResponse,
     PaperEquityHistoryResponse,
     PaperEquitySnapshotModel,
+    PaperPortfolioListResponse,
     PaperPortfolioResponse,
+    PaperPortfolioSummaryModel,
     PaperPositionModel,
     PaperRiskResponse,
     PaperTradeModel,
@@ -43,6 +45,29 @@ def _to_response(view) -> PaperPortfolioResponse:
 def get_paper_portfolio(portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID)):
     view = paper_trading_service.get_portfolio(portfolio_id)
     return _to_response(view)
+
+
+@router.get("/paper-portfolios", response_model=PaperPortfolioListResponse)
+def list_paper_portfolios():
+    """V5: every paper-trading simulation that exists, for the Multi-
+    Simulation view - a directory listing (see paper_trading.store.
+    list_portfolio_ids), not a separate index that could drift out of sync.
+    """
+    views = paper_trading_service.list_portfolios()
+    return PaperPortfolioListResponse(
+        portfolios=[
+            PaperPortfolioSummaryModel(
+                portfolio_id=v.portfolio_id,
+                starting_capital=v.starting_capital,
+                current_value=v.current_value,
+                total_return_percent=v.total_return_percent,
+                number_of_positions=v.number_of_positions,
+                number_of_trades=len(v.trades),
+                cash_percent=v.cash_percent,
+            )
+            for v in views
+        ]
+    )
 
 
 @router.post("/paper-trade", response_model=PaperPortfolioResponse)

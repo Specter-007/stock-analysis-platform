@@ -67,3 +67,15 @@ def reset_portfolio(portfolio_id: str, starting_capital: float | None = None) ->
         state["cash"] = starting_capital
     save_portfolio(portfolio_id, state)
     return state
+
+
+def list_portfolio_ids() -> list[str]:
+    """V5: enumerates every portfolio that has ever been saved, so the
+    Multi-Simulation UI can list them without a separate index file (which
+    could otherwise drift out of sync with the files it describes) - the
+    directory of JSON files IS the index.
+    """
+    with _LOCK:
+        if not _DATA_DIR.exists():
+            return []
+        return sorted(p.stem for p in _DATA_DIR.glob("*.json"))

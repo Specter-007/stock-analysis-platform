@@ -22,7 +22,7 @@ from app.config import (
 from app.indicators.compute import compute_indicator_frame, safe_float
 from app.market.regime import classify_market_regime
 from app.paper_trading.sizing import PositionSizingError, SizingRequest, calculate_shares
-from app.paper_trading.store import load_portfolio, reset_portfolio, save_portfolio
+from app.paper_trading.store import list_portfolio_ids, load_portfolio, reset_portfolio, save_portfolio
 from app.services import market_data
 from app.services.exceptions import TickerNotFoundError
 from app.signals import engine as signal_engine
@@ -252,6 +252,16 @@ def get_portfolio(portfolio_id: str) -> PortfolioView:
     if _maybe_record_snapshot(portfolio_id, state, view):
         save_portfolio(portfolio_id, state)
     return view
+
+
+def list_portfolios() -> list[PortfolioView]:
+    """V5: every portfolio that has ever been saved (directory listing, not
+    a separate index - see paper_trading.store.list_portfolio_ids), each
+    resolved through the normal get_portfolio() path so auto-exit checks
+    and equity snapshots are applied consistently with single-portfolio
+    reads.
+    """
+    return [get_portfolio(portfolio_id) for portfolio_id in list_portfolio_ids()]
 
 
 def get_equity_history(portfolio_id: str) -> EquityHistoryView:

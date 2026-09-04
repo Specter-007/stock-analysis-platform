@@ -21,6 +21,8 @@ from app.models.schemas import (
     ExperimentListRowModel,
     ExperimentResponse,
     ExperimentResultsModel,
+    ForwardVsHistoricalMetrics,
+    ForwardVsHistoricalResponse,
     ValidationOutcomeModel,
 )
 from app.services import market_data
@@ -214,6 +216,25 @@ def compare_experiments(request: CompareExperimentsRequest):
     return CompareExperimentsResponse(
         experiments=[_experiment_to_response(e) for e in result["experiments"]],
         warnings=result["warnings"],
+    )
+
+
+@router.get("/{experiment_id}/forward-vs-historical", response_model=ForwardVsHistoricalResponse)
+def get_forward_vs_historical(experiment_id: str):
+    _get_or_404(experiment_id)
+    try:
+        result = service.get_forward_vs_historical(experiment_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return ForwardVsHistoricalResponse(
+        available=result["available"],
+        reason=result["reason"],
+        historical=ForwardVsHistoricalMetrics(**result["historical"]) if result["historical"] else None,
+        historical_source=result["historical_source"],
+        forward=ForwardVsHistoricalMetrics(**result["forward"]) if result["forward"] else None,
+        forward_sample_developing=result["forward_sample_developing"],
+        deviation_notes=result["deviation_notes"],
     )
 
 

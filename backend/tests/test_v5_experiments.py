@@ -410,6 +410,77 @@ def test_full_round_trip_preserves_every_experiment_field(tmp_path, monkeypatch,
     assert vars(reloaded.config) == vars(ran.config)
 
 
+# --------------------------------------------- Forward vs. historical
+
+def test_forward_vs_historical_unavailable_before_forward_sim_started(ohlcv_long):
+    start, end = _date_range(ohlcv_long)
+    exp = service.create_experiment(_config(start_date=start, end_date=end, run_out_of_sample=True), name="No forward yet")
+    service.run_experiment(exp.id, price_data=_price_data(ohlcv_long), benchmark_df=ohlcv_long, tickers_unavailable={})
+    result = service.get_forward_vs_historical(exp.id)
+    assert result["available"] is False
+
+
+def test_forward_vs_historical_reports_developing_sample(monkeypatch, ohlcv_long):
+    from app.paper_trading import service as paper_trading_service
+
+    monkeypatch.setattr(paper_trading_service, "_current_price", lambda t: 100.0)
+    monkeypatch.setattr(paper_trading_service, "_current_signal_snapshot", lambda t: (None, None))
+    monkeypatch.setattr(paper_trading_service, "_current_market_regime", lambda: None)
+    monkeypatch.setattr(paper_trading_service, "_latest_real_trading_day", lambda: (None, None))
+
+    start, end = _date_range(ohlcv_long)
+    exp = service.create_experiment(_config(start_date=start, end_date=end, run_out_of_sample=True), name="Developing")
+    service.run_experiment(exp.id, price_data=_price_data(ohlcv_long), benchmark_df=ohlcv_long, tickers_unavailable={})
+    service.start_forward_simulation(exp.id)
+
+    result = service.get_forward_vs_historical(exp.id)
+    assert result["available"] is True
+    assert result["forward_sample_developing"] is True
+    assert result["historical"] is not None
+    assert result["historical_source"] == "OUT_OF_SAMPLE"
+
+
+def test_forward_vs_historical_falls_back_to_backtest_without_oos(monkeypatch, ohlcv_long):
+    from app.paper_trading import service as paper_trading_service
+
+    monkeypatch.setattr(paper_trading_service, "_current_price", lambda t: 100.0)
+    monkeypatch.setattr(paper_trading_service, "_current_signal_snapshot", lambda t: (None, None))
+    monkeypatch.setattr(paper_trading_service, "_current_market_regime", lambda: None)
+    monkeypatch.setattr(paper_trading_service, "_latest_real_trading_day", lambda: (None, None))
+
+    start, end = _date_range(ohlcv_long)
+    exp = service.create_experiment(_config(start_date=start, end_date=end), name="No OOS requested")
+    service.run_experiment(exp.id, price_data=_price_data(ohlcv_long), benchmark_df=ohlcv_long, tickers_unavailable={})
+    service.start_forward_simulation(exp.id)
+
+    result = service.get_forward_vs_historical(exp.id)
+    assert result["historical_source"] == "BACKTEST"
+
+
+def test_forward_vs_historical_flags_material_deviation(monkeypatch, ohlcv_long):
+    from app.experiments import service as service_module
+    from app.paper_trading import forward_validation as fv_module
+
+    class FakeForwardView:
+        total_return_percent = 50.0
+        max_drawdown_percent = -5.0
+        trading_days_observed = 30
+        insufficient_sample = False
+
+    monkeypatch.setattr(fv_module, "get_forward_validation", lambda pid: FakeForwardView())
+    monkeypatch.setattr(service_module, "_forward_sharpe", lambda pid: None)
+
+    start, end = _date_range(ohlcv_long)
+    exp = service.create_experiment(_config(start_date=start, end_date=end, run_out_of_sample=True), name="Deviation test")
+    ran = service.run_experiment(exp.id, price_data=_price_data(ohlcv_long), benchmark_df=ohlcv_long, tickers_unavailable={})
+    ran.forward_portfolio_id = "fake_portfolio"
+    store.save_experiment(ran)
+
+    result = service.get_forward_vs_historical(exp.id)
+    assert result["available"] is True
+    assert any("materially" in n for n in result["deviation_notes"])
+
+
 def test_experiment_id_uses_only_safe_characters(ohlcv_long):
     exp = service.create_experiment(_config(), name="Safe id")
     import re

@@ -1377,3 +1377,34 @@ class CompareExperimentsRequest(BaseModel):
 class CompareExperimentsResponse(BaseModel):
     experiments: list[ExperimentResponse]
     warnings: list[str]
+
+
+class ForwardVsHistoricalMetrics(BaseModel):
+    return_percent: float | None = None
+    sharpe_ratio: float | None = None
+    max_drawdown_percent: float | None = None
+    trading_days_observed: int | None = None
+
+
+class ForwardVsHistoricalResponse(BaseModel):
+    available: bool
+    reason: str | None
+    historical: ForwardVsHistoricalMetrics | None
+    historical_source: str | None
+    forward: ForwardVsHistoricalMetrics | None
+    forward_sample_developing: bool
+    deviation_notes: list[str]
+
+
+class PaperPortfolioSummaryModel(BaseModel):
+    portfolio_id: str
+    starting_capital: float
+    current_value: float
+    total_return_percent: float
+    number_of_positions: int
+    number_of_trades: int
+    cash_percent: float
+
+
+class PaperPortfolioListResponse(BaseModel):
+    portfolios: list[PaperPortfolioSummaryModel]

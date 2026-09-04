@@ -40,10 +40,20 @@ from app.experiments.models import (
     ExperimentResults,
     ValidationOutcome,
 )
+from app.backtesting import metrics as backtest_metrics
 from app.market.regime_performance import compute_regime_performance
+from app.paper_trading import forward_validation
 from app.paper_trading import service as paper_trading_service
 from app.services.exceptions import InsufficientHistoryError
 from app.utils import timeutils
+
+# A plain, disclosed percentage-point threshold - the same "documented
+# heuristic, not a hypothesis test" philosophy used by model drift
+# detection (app.model_evaluation.drift): forward paper-trading and
+# historical backtest returns are each single realized paths, not
+# repeated-trial samples, so no classical significance test applies here
+# either.
+FORWARD_DEVIATION_MATERIAL_THRESHOLD_PP = 10.0
 
 FORWARD_SIM_UNSUPPORTED_MESSAGE = (
     "Forward paper simulation is not yet supported for multi-ticker portfolio experiments - "
@@ -461,4 +471,112 @@ def compare_experiments(experiment_ids: list[str]) -> dict:
     return {
         "experiments": experiments,
         "warnings": warnings,
+    }
+
+
+# --------------------------------------------- Forward vs. historical (V5)
+
+
+def _historical_expectation(experiment: Experiment) -> tuple[dict | None, str | None]:
+    """Prefers the out-of-sample OUT_OF_SAMPLE period (held-out data, the
+    most honest "historical expectation" available) over the plain backtest
+    (which includes the in-sample period the model/thresholds were tuned
+    against, if at all) - falls back to the backtest only if OOS wasn't
+    requested or didn't complete.
+    """
+    if experiment.results is None:
+        return None, None
+
+    oos = experiment.results.out_of_sample
+    if oos.completed and oos.result:
+        periods = oos.result.get("periods", [])
+        oos_period = next((p for p in periods if p.get("label") == "OUT_OF_SAMPLE"), None)
+        if oos_period and oos_period.get("total_return_percent") is not None:
+            return {
+                "return_percent": oos_period.get("total_return_percent"),
+                "sharpe_ratio": oos_period.get("sharpe_ratio"),
+                "max_drawdown_percent": oos_period.get("max_drawdown_percent"),
+            }, "OUT_OF_SAMPLE"
+
+    bt = experiment.results.backtest
+    if bt.completed and bt.result and bt.result.get("total_return_percent") is not None:
+        return {
+            "return_percent": bt.result.get("total_return_percent"),
+            "sharpe_ratio": bt.result.get("sharpe_ratio"),
+            "max_drawdown_percent": bt.result.get("max_drawdown_percent"),
+        }, "BACKTEST"
+
+    return None, None
+
+
+def _forward_sharpe(portfolio_id: str) -> float | None:
+    history = paper_trading_service.get_equity_history(portfolio_id)
+    if len(history.snapshots) < 5:
+        return None
+
+    equity = pd.Series([s.equity for s in history.snapshots])
+    return backtest_metrics.sharpe_ratio(equity.pct_change())
+
+
+def get_forward_vs_historical(experiment_id: str) -> dict:
+    experiment = store.load_experiment(experiment_id)
+    if experiment is None:
+        raise ValueError(f"Experiment not found: {experiment_id}")
+
+    if not experiment.forward_portfolio_id:
+        return {
+            "available": False,
+            "reason": "No forward simulation has been started from this experiment yet.",
+            "historical": None,
+            "historical_source": None,
+            "forward": None,
+            "forward_sample_developing": True,
+            "deviation_notes": [],
+        }
+
+    fv = forward_validation.get_forward_validation(experiment.forward_portfolio_id)
+    historical, historical_source = _historical_expectation(experiment)
+
+    forward = {
+        "return_percent": fv.total_return_percent,
+        "sharpe_ratio": _forward_sharpe(experiment.forward_portfolio_id),
+        "max_drawdown_percent": fv.max_drawdown_percent,
+        "trading_days_observed": fv.trading_days_observed,
+    }
+
+    deviation_notes: list[str] = []
+    if historical is None:
+        deviation_notes.append("No historical backtest or out-of-sample result is available on this experiment to compare against.")
+    elif fv.insufficient_sample:
+        deviation_notes.append(
+            f"Forward sample is still developing ({fv.trading_days_observed} trading day(s) observed) - "
+            "too early to compare meaningfully against the historical expectation."
+        )
+    else:
+        if historical.get("return_percent") is not None and forward["return_percent"] is not None:
+            diff = forward["return_percent"] - historical["return_percent"]
+            if abs(diff) >= FORWARD_DEVIATION_MATERIAL_THRESHOLD_PP:
+                direction = "higher" if diff > 0 else "lower"
+                deviation_notes.append(
+                    f"Forward return is materially {direction} than the historical expectation "
+                    f"({forward['return_percent']:.1f}% vs {historical['return_percent']:.1f}%, a "
+                    f"{abs(diff):.1f} percentage-point difference)."
+                )
+            else:
+                deviation_notes.append("Forward return is currently within the historical expectation's range.")
+
+        if historical.get("max_drawdown_percent") is not None and forward["max_drawdown_percent"] is not None:
+            dd_diff = forward["max_drawdown_percent"] - historical["max_drawdown_percent"]
+            if abs(dd_diff) >= FORWARD_DEVIATION_MATERIAL_THRESHOLD_PP:
+                direction = "deeper" if dd_diff < 0 else "shallower"
+                deviation_notes.append(f"Forward drawdown is materially {direction} than the historical expectation.")
+
+    return {
+        "available": True,
+        "reason": None,
+        "historical": historical,
+        "historical_source": historical_source,
+        "forward": forward,
+        "forward_sample_developing": fv.insufficient_sample,
+        "deviation_notes": deviation_notes,
     }
