@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
 // Server-only (never NEXT_PUBLIC_*) - the real backend URL. Read at
-// request time, never sent to the browser. Not used in local dev, where
-// the frontend calls the local backend directly via
-// NEXT_PUBLIC_API_BASE_URL instead (see frontend/.env.local).
+// request time, never sent to the browser. Used identically in local dev
+// (defaults to the local backend) and production (the real Render URL,
+// set via this exact env var in Vercel) - see lib/api.ts for why the
+// browser always calls this app's own origin instead of ever knowing
+// this value.
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
 // Headers that must never be forwarded verbatim in either direction -
@@ -21,31 +23,6 @@ const RESPONSE_HOP_BY_HOP_HEADERS = new Set([
 ]);
 
 /**
- * TEMPORARY DIAGNOSTICS (see docs/DEPLOYMENT.md's incident log) - safe to
- * observe in the browser's Network tab, never logs a token/cookie value,
- * only booleans/counts/names. Remove this block (and the two call sites
- * below) once the real production failure point is confirmed and fixed.
- */
-function addDebugHeaders(
-  headers: Headers,
-  info: { incomingCookieNames: string[]; backendStatus: number; setCookieNames: string[] }
-) {
-  headers.set("x-debug-cookie-received", String(info.incomingCookieNames.length > 0));
-  headers.set("x-debug-cookie-names", info.incomingCookieNames.join(",") || "(none)");
-  headers.set("x-debug-backend-status", String(info.backendStatus));
-  headers.set("x-debug-setcookie-count", String(info.setCookieNames.length));
-  headers.set("x-debug-setcookie-names", info.setCookieNames.join(",") || "(none)");
-}
-
-function parseIncomingCookieNames(cookieHeader: string | null): string[] {
-  if (!cookieHeader) return [];
-  return cookieHeader
-    .split(";")
-    .map((pair) => pair.split("=")[0]?.trim())
-    .filter((name): name is string => Boolean(name));
-}
-
-/**
  * Same-origin API proxy: the browser only ever talks to this Next.js
  * app's own origin - this forwards the request server-side to the real
  * backend and forwards the response back in both directions.
@@ -60,7 +37,7 @@ function parseIncomingCookieNames(cookieHeader: string | null): string[] {
  * destinations) but not in real production. This handler forwards both
  * directions explicitly, under this app's own control.
  *
- * Two subtleties that matter:
+ * Three things that matter here, each a real production incident:
  * 1. A response can carry MULTIPLE Set-Cookie headers (login sets two -
  *    session_token and csrf_token). `Headers.get("set-cookie")` merges
  *    multiple values into a single comma-joined string, which is not
@@ -70,14 +47,17 @@ function parseIncomingCookieNames(cookieHeader: string | null): string[] {
  *    this is a personalized, cookie-authenticated API; if any layer
  *    (Vercel's edge, an intermediate CDN, the browser's own HTTP cache)
  *    ever cached a response here without this header, a stale
- *    unauthenticated 401 could keep being served to an now-authenticated
- *    user, or worse. Neither Next.js's own dynamic-route detection nor
- *    the backend setting no explicit Cache-Control is a substitute for
- *    this being explicit here.
+ *    unauthenticated 401 could keep being served to a now-authenticated
+ *    user. Neither Next.js's own dynamic-route detection nor the backend
+ *    omitting Cache-Control is a substitute for this being explicit here.
+ * 3. This proxy is only ever reached at all if the browser calls this
+ *    app's own origin in the first place - see lib/api.ts's API_BASE_URL,
+ *    hardcoded to "" rather than read from an environment variable, after
+ *    a real incident where a misconfigured NEXT_PUBLIC_API_BASE_URL made
+ *    the deployed browser bundle call the backend directly, bypassing
+ *    this proxy entirely regardless of how correct it was.
  */
 export async function proxyToBackend(req: NextRequest, pathSegments: string[]): Promise<NextResponse> {
-  const incomingCookieNames = parseIncomingCookieNames(req.headers.get("cookie"));
-
   const backendUrl = new URL(`/api/${pathSegments.join("/")}`, BACKEND_URL);
   backendUrl.search = req.nextUrl.search;
 
@@ -105,17 +85,14 @@ export async function proxyToBackend(req: NextRequest, pathSegments: string[]): 
     // status) - return a real JSON error instead of letting this throw
     // into Next.js's generic HTML error page, which the frontend's
     // apiFetch (expects JSON) cannot parse into a useful message.
+    console.error("[backend-proxy] upstream fetch failed", err instanceof Error ? err.message : err);
     const res = NextResponse.json(
       { error_type: "PROXY_UPSTREAM_UNREACHABLE", detail: "Could not reach the backend." },
       { status: 502 }
     );
     res.headers.set("cache-control", "no-store");
-    addDebugHeaders(res.headers, { incomingCookieNames, backendStatus: 0, setCookieNames: [] });
-    console.error("[backend-proxy] upstream fetch failed", err instanceof Error ? err.message : err);
     return res;
   }
-
-  const setCookies = backendResponse.headers.getSetCookie();
 
   const responseHeaders = new Headers();
   backendResponse.headers.forEach((value, key) => {
@@ -123,15 +100,10 @@ export async function proxyToBackend(req: NextRequest, pathSegments: string[]): 
       responseHeaders.append(key, value);
     }
   });
-  for (const cookie of setCookies) {
+  for (const cookie of backendResponse.headers.getSetCookie()) {
     responseHeaders.append("set-cookie", cookie);
   }
   responseHeaders.set("cache-control", "no-store");
-  addDebugHeaders(responseHeaders, {
-    incomingCookieNames,
-    backendStatus: backendResponse.status,
-    setCookieNames: setCookies.map((c) => c.split("=")[0]?.trim() ?? "?"),
-  });
 
   return new NextResponse(backendResponse.body, {
     status: backendResponse.status,

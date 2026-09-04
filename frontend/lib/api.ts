@@ -50,17 +50,33 @@ import type {
 } from "@/types/api";
 import type { Notification, NotificationListResponse, Preferences, SessionListResponse, User } from "@/types/auth";
 
-// `??` (not `||`): production deliberately sets this to an EMPTY string so
-// every request is same-origin (routed through the Next.js Route Handler
-// proxy at app/api/[...path]/route.ts, which forwards /api/* server-side
-// to the real backend) rather than a direct cross-site call to it - `||`
-// would treat that empty string as falsy and silently fall back to
-// localhost. See docs/DEPLOYMENT.md's "Frontend API URL" section for why:
-// the frontend and backend are on different registrable domains in
-// production, and a SameSite=Lax session/CSRF cookie is never sent on a
-// genuine cross-site fetch - only a same-origin request (this proxy)
-// makes auth work at all without weakening cookie security.
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+// ALWAYS same-origin - not configurable, not read from an environment
+// variable. Every request goes to this app's own /api/* path, which the
+// Next.js Route Handler proxy (app/api/[...path]/route.ts) forwards
+// server-side to BACKEND_URL - in both local dev (defaults to
+// http://localhost:8000) and production (the real Render URL). This
+// works identically in dev and prod on purpose: the frontend and backend
+// are on different registrable domains in production
+// (*.vercel.app / *.onrender.com), and a SameSite=Lax session/CSRF cookie
+// is never sent on a genuine cross-site fetch - only a same-origin
+// request (this proxy) makes auth work at all without weakening cookie
+// security. See docs/DEPLOYMENT.md's "Frontend API URL" section.
+//
+// This used to be a NEXT_PUBLIC_API_BASE_URL environment variable that
+// the browser build baked in. That was the actual root cause of a real
+// production incident: the deployed bundle had this baked to the direct
+// Render URL (confirmed in Chrome DevTools - the browser was calling
+// https://stock-analyst-backend.onrender.com/api/auth/login directly,
+// bypassing the proxy entirely, no matter how correct the proxy itself
+// was). A NEXT_PUBLIC_* value is compiled into the client bundle at BUILD
+// time; if a dashboard's environment-variable value is ever wrong, stale,
+// or an empty string doesn't save the way it's expected to, every
+// authenticated request silently becomes a broken cross-site one with no
+// error message pointing at the actual cause. Removing the variable
+// removes that entire failure class - there is no environment-variable
+// value that can ever make the browser call anything other than its own
+// origin again.
+export const API_BASE_URL = "";
 
 export class ApiError extends Error {
   status: number;

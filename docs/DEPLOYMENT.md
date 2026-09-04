@@ -64,137 +64,88 @@ script working as intended, not a bug to silence.
 
 ## Frontend API URL - same-origin proxy (connecting Vercel to Render)
 
-**Production does NOT call the Render backend directly from the browser.**
-An earlier version of this document recommended pointing
-`NEXT_PUBLIC_API_BASE_URL` straight at the Render URL - that architecture
-has a real, confirmed bug: the frontend (`*.vercel.app`) and backend
-(`*.onrender.com`) are different registrable domains, so a direct
-cross-site call is genuinely cross-site, and the session/CSRF cookies
-(`SameSite=Lax` - see `app/auth/cookies.py`) are **never attached** to a
-cross-site `fetch`, regardless of `credentials: "include"`. Observed
-symptom: `POST /api/auth/login` → `200`, immediately followed by
-`GET /api/auth/me` → `401`, because the browser never sent the session
-cookie back on the second request.
+**Production does NOT call the Render backend directly from the browser.
+There is no environment variable that controls this - it is hardcoded.**
+`frontend/lib/api.ts`'s `API_BASE_URL` is the literal empty string,
+unconditionally. Every browser request goes to this app's own origin
+(`/api/auth/login`, `/api/auth/me`, `/api/watchlist`, etc.), which the
+Next.js Route Handler proxy (`frontend/app/api/[...path]/route.ts`, logic
+in `frontend/lib/backend-proxy.ts`) forwards server-side to `BACKEND_URL`
+- the real Render URL, read only on the server, never sent to the
+browser. From the browser's point of view every request is same-origin,
+so `SameSite=Lax`, `Secure`, and `HttpOnly` all keep working exactly as
+configured on the backend (`app/auth/cookies.py` - unchanged; neither is
+the backend's CORS/CSRF configuration).
 
-**Fix: a same-origin API proxy.** The browser only ever talks to the
-frontend's own origin (`/api/*`); this app forwards that request
-server-side to the real Render backend. From the browser's point of view
-every request - login, `/me`, watchlist, everything - is same-origin, so
-`SameSite=Lax`, `Secure`, and `HttpOnly` all keep working exactly as
-configured. **No cookie or CORS security setting was loosened to fix
-this** - the backend's `app/auth/cookies.py` is unchanged, and neither is
-its CORS/CSRF configuration.
+**Incident history, because it matters for anyone touching this again -
+three real production failures, each with a different root cause:**
 
-**Implementation history, because it matters for anyone touching this
-again**: the first attempt at this proxy used Next.js's declarative
-`rewrites()` (`frontend/next.config.ts`). It passed local testing (a
-production build run via `next start` against a real local backend) but
-**did not work in real Vercel production** - login still returned 200
-while `/api/auth/me` still returned 401. Root cause: rewriting to an
-*external* destination is handled by Vercel's own opaque edge-routing
-layer, not by the same code path `next start` uses locally, and it did
-not reliably forward the `Cookie` request header and/or the backend's
-`Set-Cookie` response headers end to end. This is now implemented instead
-as an explicit Next.js Route Handler
-(`frontend/app/api/[...path]/route.ts`, logic in
-`frontend/lib/backend-proxy.ts`) - this app's own code, using `fetch()`
-directly, so both directions are forwarded under its own control and can
-be verified rather than trusted. One subtlety this handler specifically
-gets right that a naive implementation would not: a response can carry
-**multiple** `Set-Cookie` headers (login sets two - `session_token` and
-`csrf_token`) - `Headers.get("set-cookie")` merges them into a single,
-invalid, comma-joined string, silently breaking one or both cookies; this
-uses `Headers.getSetCookie()` and re-appends each cookie individually.
-See `frontend/lib/backend-proxy.test.ts` for regression coverage of this
-exact behavior (mocked backend, no network needed), and the "Frontend"
-section of this document's audit history for how this was actually
-verified against a real local backend (not just asserted): register,
-login, `/me`, logout, CSRF-protected and unauthenticated requests, and
-watchlist all round-tripped correctly, including confirming both
-`Set-Cookie` headers arrive as separate headers rather than merged.
+1. **Direct cross-site calls.** The frontend originally called the Render
+   URL directly via `NEXT_PUBLIC_API_BASE_URL`. Vercel (`*.vercel.app`)
+   and Render (`*.onrender.com`) are different registrable domains, so
+   that is a genuinely cross-site request, and `SameSite=Lax` cookies are
+   never attached to a cross-site `fetch` regardless of
+   `credentials: "include"`. Symptom: login → `200`, `/me` → `401`.
+2. **`rewrites()` didn't reliably forward cookies.** The first proxy
+   attempt used Next.js's declarative `rewrites()`
+   (`frontend/next.config.ts`). It passed local testing (`next start`
+   against a real local backend) but not real Vercel production -
+   rewriting to an *external* destination is handled by Vercel's own
+   opaque edge-routing layer, a different code path than `next start`
+   uses locally, and it did not reliably forward `Cookie`/`Set-Cookie`
+   end to end. Replaced with an explicit Route Handler using `fetch()`
+   directly - this app's own code, forwarding both directions under its
+   own control, correctly using `Headers.getSetCookie()` (not
+   `Headers.get()`, which merges multiple `Set-Cookie` headers - this
+   app's login sets two, `session_token` and `csrf_token` - into a
+   single invalid comma-joined string).
+3. **The environment variable was still the actual point of failure.**
+   Even after (2) was deployed, Chrome DevTools on the real production
+   site showed the browser *still* calling
+   `https://stock-analyst-backend.onrender.com/api/auth/login` directly -
+   proof the correct proxy code was never even being reached.
+   `NEXT_PUBLIC_API_BASE_URL` is compiled into the browser bundle at
+   **build** time; whatever value was actually present in Vercel's build
+   environment (stale from step 1, or an empty string that did not save
+   the way it was expected to) was still the literal Render URL. No
+   proxy implementation, however correct, matters if the browser bundle
+   was never built to call it. **Fixed by removing the environment
+   variable from the browser-facing code path entirely** - `API_BASE_URL`
+   is now a hardcoded `""`, not read from `process.env` at all, so there
+   is no dashboard value that can ever reintroduce this failure mode
+   again. Confirmed by grepping the actual built client bundle
+   (`frontend/.next/static/`) for `onrender.com` after a fresh
+   `npm run build` - zero matches; the string appears only in a
+   server-side source map, which the browser never receives.
 
-Required Vercel environment variables for this to work (unchanged from
-the previous attempt - this is a server-side implementation change, not
-a configuration change):
-
-| Variable | Value | Scope |
-|---|---|---|
-| `NEXT_PUBLIC_API_BASE_URL` | **empty string** (literally blank - not unset, not `http://localhost:8000`) | Production |
-| `BACKEND_URL` | the real Render URL, e.g. `https://stock-analyst-backend.onrender.com` (no trailing slash) | Production (server-only - never exposed to the browser, deliberately not `NEXT_PUBLIC_*`) |
-
-Setting `NEXT_PUBLIC_API_BASE_URL` to an empty string (not leaving it
-unset) matters: `frontend/lib/api.ts` uses `??`, not `||`, specifically so
-an intentional empty string is respected as "same-origin" rather than
-being treated as falsy and silently falling back to `localhost:8000` -
-see the regression tests in `frontend/lib/api.test.ts`.
+**Required Vercel environment variables**: only `BACKEND_URL` (server-only,
+the real Render URL, e.g. `https://stock-analyst-backend.onrender.com`,
+no trailing slash). **`NEXT_PUBLIC_API_BASE_URL` should not exist as a
+Vercel environment variable at all** - if it is still set from an earlier
+deployment attempt, it is now inert (the code no longer reads it), but
+removing it avoids confusion for whoever looks at the dashboard next.
 
 Steps:
 
-1. Vercel dashboard → **Settings** → **Environment Variables** → add both
-   variables above, scoped to Production.
-2. **Trigger a new deployment** - Next.js bakes `NEXT_PUBLIC_*` variables
-   into the build at build time; `BACKEND_URL` is read at request time by
-   the Route Handler (a serverless function), but redeploying after any
-   env var change is the safe default regardless (**Deployments** → **⋯**
-   → **Redeploy**, or push a new commit).
-3. Local development is unaffected: `frontend/.env.local` (gitignored)
-   keeps `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000` set, so
-   `npm run dev` continues to call a locally-running backend directly -
-   `localhost:3000` and `localhost:8000` differ only by port, which is
-   same-site for cookie purposes, so the proxy was never needed there.
-   Verified locally end-to-end (production build + `next start`, a real
-   local backend, and the proxy wired via `BACKEND_URL`) before this was
-   documented: register, login, `/me`, logout, CSRF-protected requests,
-   watchlist, preferences, and paper trading all round-tripped correctly
-   through `/api/*` on the frontend's own origin.
-
-### Temporary production diagnostics (remove once confirmed fixed)
-
-The Route Handler proxy (`frontend/lib/backend-proxy.ts`) currently adds
-safe, non-sensitive debug response headers to every `/api/*` response -
-added because the Route Handler replacement above was itself deployed
-once and *still* did not fix production auth, and local reproduction had
-already been exhausted as a diagnostic tool at that point. **Never** logs
-or exposes a token/cookie value - only booleans, counts, and cookie
-*names*:
-
-| Header | Meaning |
-|---|---|
-| `x-debug-cookie-received` | `true`/`false` - did this request arrive at the proxy with a `Cookie` header at all? |
-| `x-debug-cookie-names` | comma-separated cookie **names** the proxy received (never values) |
-| `x-debug-backend-status` | the raw HTTP status the backend itself returned |
-| `x-debug-setcookie-count` | how many `Set-Cookie` headers the backend response had |
-| `x-debug-setcookie-names` | comma-separated cookie **names** from those `Set-Cookie` headers |
-
-**How to use them**: open the real production site in a browser, open
-DevTools → Network tab, go through register → login → visit Watchlist,
-and for each of `/api/auth/login`, `/api/auth/me`, and `/api/watchlist`
-check the **Response Headers**:
-
-- `/api/auth/login`: expect `x-debug-setcookie-count: 2` and
-  `x-debug-setcookie-names: session_token,csrf_token`. If this is missing
-  or shows `0`, the backend→proxy leg is broken (check Render logs / the
-  backend is even receiving the request).
-- Then check the **Application/Storage tab → Cookies** for
-  `stock-analysis-platform-gamma.vercel.app` - are `session_token` and
-  `csrf_token` actually listed there after login? If the response header
-  above showed 2 cookies but they are NOT in browser storage, the browser
-  is rejecting them (check for a `Domain` mismatch or scheme issue in the
-  actual `Set-Cookie` string, visible in the same Network tab entry).
-- `/api/auth/me`: check `x-debug-cookie-received`. If `false`, the browser
-  has the cookie (per the previous step) but did not send it back on this
-  request - and `x-debug-cookie-names` will confirm exactly which
-  cookie(s), if any, did arrive.
-- If `x-debug-cookie-received` is `true` and `x-debug-backend-status` is
-  still `401`, the cookie reached the proxy and was forwarded, but the
-  *backend* rejected the session (expired/revoked/database issue) - a
-  different bug than a cookie-forwarding one.
-
-Report back which of these is observed and the exact header values (not
-screenshots with cookie values visible) - that pinpoints the failure
-stage precisely instead of guessing again. Remove this block and the
-`addDebugHeaders`/`x-debug-*` code in `lib/backend-proxy.ts` once the
-real cause is confirmed and fixed.
+1. Vercel dashboard → **Settings** → **Environment Variables** → ensure
+   `BACKEND_URL` is set to the real Render URL, scoped to Production.
+   Remove `NEXT_PUBLIC_API_BASE_URL` if present.
+2. **Redeploy** (**Deployments** → **⋯** → **Redeploy**, or push a new
+   commit) so the build picks up the new code - this is a code change,
+   not just a configuration change, so a redeploy is required regardless
+   of environment variables.
+3. Local development is unaffected: `npm run dev` proxies through the
+   same Route Handler, which defaults `BACKEND_URL` to
+   `http://localhost:8000` when unset - no environment variable needed
+   locally either. Verified end-to-end locally (production build +
+   `next start`, a real local backend, and the proxy wired via
+   `BACKEND_URL`) through the exact same URL structure the production
+   browser uses (`/api/auth/login`, `/api/auth/me`, `/api/watchlist`):
+   register, login (raw `Set-Cookie` headers inspected - both cookies
+   present and separate), `/me` → `200` with the authenticated user,
+   watchlist → `200`, a CSRF-protected mutation without the header →
+   `403` and with it → `200`, logout → `200`, `/me` afterward → `401`,
+   watchlist afterward → `401` again.
 
 ## Recommended architecture
 
@@ -267,11 +218,15 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 
 # Frontend (from frontend/)
 npm run build
-NEXT_PUBLIC_API_BASE_URL=https://api.yourdomain.com npm run start
+BACKEND_URL=https://your-backend-host npm run start
 ```
 
-`NEXT_PUBLIC_API_BASE_URL` is baked in at build time for a production
-Next.js build - set it correctly *before* `npm run build`, not after.
+The browser always calls this app's own origin (`/api/*`) - see "Frontend
+API URL - same-origin proxy" above. `BACKEND_URL` (server-only, read at
+request time by the proxy at `frontend/app/api/[...path]/route.ts`) is
+the only variable that matters here, and unlike a `NEXT_PUBLIC_*`
+variable it does not need to be set before `npm run build` - there is no
+client-facing API base URL to configure at all.
 
 ## Preflight check
 
@@ -397,8 +352,11 @@ you have actually performed the action against a real external service.**
    `backend/.env.example` on the backend host's real environment-variable
    settings (never committed to the repo): `APP_ENV=production`,
    `SESSION_SECRET` (a real random value), `CORS_ALLOWED_ORIGINS` (your
-   real frontend origin), `FRONTEND_URL`/`BACKEND_URL`, and set
-   `NEXT_PUBLIC_API_BASE_URL`/`NEXT_PUBLIC_SITE_URL` on the frontend host.
+   real frontend origin), `FRONTEND_URL`. On the frontend host, set
+   `BACKEND_URL` (server-only, the real backend URL) and
+   `NEXT_PUBLIC_SITE_URL` - there is deliberately no client-facing API
+   base URL variable; the browser always calls its own origin (see
+   "Frontend API URL - same-origin proxy" above).
 3. **Configure PostgreSQL** - copy the provider's connection string
    (already includes `sslmode=require` or equivalent) into `DATABASE_URL`
    on the backend host. Do not hand-edit it into a different shape.
@@ -427,8 +385,8 @@ you have actually performed the action against a real external service.**
     host configured in step 1, with `uvicorn`/`gunicorn` as the start
     command (see "Start commands" above).
 11. **Deploy the frontend** - push/trigger a deploy of `frontend/` to
-    Vercel, with `NEXT_PUBLIC_API_BASE_URL` already set correctly (it is
-    baked in at build time, not read at runtime).
+    Vercel, with `BACKEND_URL` already set (server-only, read at request
+    time by the proxy - no client-facing API base URL to configure).
 12. **Verify health endpoints** - `curl https://api.yourdomain.com/api/health`
     and `.../api/health/ready` both return `200` with the expected JSON
     body (see "Health / readiness" above).
