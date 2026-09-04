@@ -30,9 +30,12 @@ start, and Neon's free-tier autosuspend cold start. Both only affect the
 
 ## Prerequisites
 
-- A PostgreSQL server (see [DATABASE.md](DATABASE.md) - not verified
-  against a real instance in this development environment, only against
-  SQLite).
+- A PostgreSQL server (see [DATABASE.md](DATABASE.md) - schema,
+  constraints, and concurrency behavior verified against a real disposable
+  PostgreSQL server in this development environment; a real *managed*
+  provider instance has not been, and may differ in configuration
+  defaults - re-run `alembic upgrade head` and the test suite against your
+  actual target before relying on it).
 - A place to run the backend (any host that can run Python 3.12+ and
   `uvicorn`/`gunicorn`) and the frontend (any host that can run
   `next start`, or a static/edge platform that supports Next.js's
@@ -170,3 +173,90 @@ proprietary managed-service dependencies beyond "a PostgreSQL database"
 and "somewhere to run a Python process and a Node process"). Deploy to
 whatever you already use - a VM, a container platform, a PaaS that
 supports both processes, etc.
+
+## Full deployment procedure (first launch)
+
+A concrete, ordered checklist for taking this app from "code in a repo" to
+"actually serving real traffic," using the architecture recommended above
+(substitute your own providers - the steps are the same shape). **Do not
+mark a step done because the *code* supports it - each one below means
+you have actually performed the action against a real external service.**
+
+1. **Create production services** - a Neon (or other) PostgreSQL project,
+   a Render (or other) Web Service for the backend, a Vercel project for
+   the frontend, and - only if you intend to run more than one backend
+   instance/process - an Upstash (or other) Redis instance.
+2. **Configure environment variables** - set every variable in
+   `backend/.env.example` on the backend host's real environment-variable
+   settings (never committed to the repo): `APP_ENV=production`,
+   `SESSION_SECRET` (a real random value), `CORS_ALLOWED_ORIGINS` (your
+   real frontend origin), `FRONTEND_URL`/`BACKEND_URL`, and set
+   `NEXT_PUBLIC_API_BASE_URL`/`NEXT_PUBLIC_SITE_URL` on the frontend host.
+3. **Configure PostgreSQL** - copy the provider's connection string
+   (already includes `sslmode=require` or equivalent) into `DATABASE_URL`
+   on the backend host. Do not hand-edit it into a different shape.
+4. **Run migrations** - `alembic upgrade head` against that `DATABASE_URL`
+   as a release step, before the new backend code starts serving traffic
+   (see "Database migration on deploy" above).
+5. **Configure SMTP** - set `EMAIL_PROVIDER=smtp` plus `SMTP_HOST`/
+   `SMTP_PORT`/`SMTP_USERNAME`/`SMTP_PASSWORD`/`EMAIL_FROM_ADDRESS` from
+   your transactional email provider (Resend/Brevo/etc.).
+6. **Configure Redis (only if applicable)** - if you provisioned one in
+   step 1, set `RATE_LIMIT_STORAGE_URL` to its connection string. Skip
+   this step entirely for a single-instance deployment - there is nothing
+   for it to do, and the app runs correctly without it.
+7. **Configure backups** - enable your PostgreSQL provider's point-in-time
+   recovery/automated backup feature in its dashboard (see
+   [DATABASE.md](DATABASE.md#backups-and-recovery)). This is a real,
+   provider-side action - the codebase cannot do it for you.
+8. **Configure domain/DNS** - point your domain's DNS at Vercel (frontend)
+   and your backend host (typically a subdomain such as
+   `api.yourdomain.com`), keeping both on the same registrable domain (see
+   the CORS/cookies note above).
+9. **Enable HTTPS** - typically automatic once DNS is configured on
+   Vercel/Render-style platforms; confirm the certificate is actually
+   issued and serving before continuing.
+10. **Deploy the backend** - push/trigger a deploy of `backend/` to the
+    host configured in step 1, with `uvicorn`/`gunicorn` as the start
+    command (see "Start commands" above).
+11. **Deploy the frontend** - push/trigger a deploy of `frontend/` to
+    Vercel, with `NEXT_PUBLIC_API_BASE_URL` already set correctly (it is
+    baked in at build time, not read at runtime).
+12. **Verify health endpoints** - `curl https://api.yourdomain.com/api/health`
+    and `.../api/health/ready` both return `200` with the expected JSON
+    body (see "Health / readiness" above).
+13. **Run smoke tests** - manually load the frontend's home page, the
+    login page, and one public tool page (e.g. `/analysis?ticker=AAPL`)
+    in a real browser against the real deployed URLs, confirming no
+    console errors and no failed network requests.
+14. **Verify authentication** - register a real test account through the
+    deployed frontend, confirm the session cookie is set (check dev tools
+    - `Secure`, `HttpOnly`, `SameSite=Lax`), sign out, sign back in.
+15. **Verify email verification** - confirm the verification email is
+    actually delivered to a real inbox (not just logged), and that
+    clicking its link verifies the account.
+16. **Verify password reset** - request a reset for the test account,
+    confirm the email arrives, and that the reset link actually changes
+    the password and invalidates the old one.
+17. **Verify database operations** - create a watchlist entry, a paper
+    trade, and an experiment through the real deployed UI; confirm each
+    persists across a page reload (i.e. is actually round-tripping through
+    the real production database, not a stale client cache).
+18. **Verify rate limiting** - deliberately trigger it (e.g. several rapid
+    failed login attempts) and confirm a `429` response appears, using
+    whatever storage backend you actually configured in step 6.
+19. **Verify user isolation** - register a second real test account and
+    confirm it cannot see the first account's watchlist/portfolio/
+    experiments (the same property `backend/tests/test_idor.py` proves
+    locally - this step re-confirms it against the real deployed system).
+20. **Verify export, deletion, and rollback** - use the first test
+    account's Settings → Privacy → "Export my data" and confirm the
+    download contains real data; delete the second test account and
+    confirm its data is gone; and confirm you know the rollback procedure
+    for a bad deploy (`alembic downgrade -1` for a bad migration, your
+    host's previous-deploy/rollback feature for a bad code deploy) *before*
+    you need it under pressure, not after.
+
+**Do not consider a step complete if it depends on an external service you
+have not actually configured** - a documented environment variable with no
+real account behind it is not the same as a working integration.
