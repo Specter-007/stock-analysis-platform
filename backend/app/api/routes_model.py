@@ -18,8 +18,12 @@ from app.config import (
 from app.indicators.compute import compute_indicator_frame
 from app.market.regime_performance import compute_regime_performance
 from app.model_evaluation.comparison import compare_model_versions
+from app.model_evaluation.drift import detect_model_drift
 from app.model_evaluation.scorecard import build_model_scorecard
 from app.models.schemas import (
+    DistributionComparisonModel,
+    DriftRequest,
+    DriftResponse,
     ModelComparisonRequest,
     ModelComparisonResponse,
     ModelInfoResponse,
@@ -244,6 +248,39 @@ def post_model_scorecard(request: ScorecardRequest):
         model_version=result.model_version,
         dimensions=[ScorecardDimensionModel(**d.__dict__) for d in result.dimensions],
         composite_note=result.composite_note,
+        methodology=result.methodology,
+        meta=meta.to_dict(),
+    )
+
+
+@router.post("/drift", response_model=DriftResponse)
+def post_model_drift(request: DriftRequest):
+    ticker = normalize_and_validate_ticker(request.ticker)
+    benchmark = normalize_and_validate_ticker(request.benchmark)
+
+    full_df, meta = market_data.get_full_daily_history(ticker)
+    benchmark_df, _ = market_data.get_full_daily_history(benchmark)
+
+    result = detect_model_drift(
+        ticker=ticker,
+        full_price_df=full_df,
+        benchmark=benchmark,
+        benchmark_full_price_df=benchmark_df,
+        model_version=request.model_version,
+    )
+
+    def _to_model(c) -> DistributionComparisonModel | None:
+        return DistributionComparisonModel(**c.__dict__) if c is not None else None
+
+    return DriftResponse(
+        ticker=result.ticker,
+        model_version=result.model_version,
+        historical_sessions=result.historical_sessions,
+        recent_sessions=result.recent_sessions,
+        insufficient_data=result.insufficient_data,
+        signal_distribution=_to_model(result.signal_distribution),
+        factor_distribution=_to_model(result.factor_distribution),
+        regime_distribution=_to_model(result.regime_distribution),
         methodology=result.methodology,
         meta=meta.to_dict(),
     )

@@ -1145,6 +1145,42 @@ class ScorecardResponse(BaseModel):
     meta: DataMeta
 
 
+# --------------------------------------------------------- Model Drift (V5)
+
+class DriftRequest(BaseModel):
+    ticker: str
+    benchmark: str = Field(default=DEFAULT_BENCHMARK_TICKER)
+    model_version: str = Field(default=MODEL_VERSION_CURRENT)
+
+    @field_validator("model_version")
+    @classmethod
+    def valid_model_version_drift(cls, v: str) -> str:
+        if v not in SUPPORTED_MODEL_VERSIONS:
+            return MODEL_VERSION_CURRENT
+        return v
+
+
+class DistributionComparisonModel(BaseModel):
+    dimension: str
+    historical_percent: dict[str, float]
+    recent_percent: dict[str, float]
+    shifted_buckets: list[str]
+    flagged: bool
+
+
+class DriftResponse(BaseModel):
+    ticker: str
+    model_version: str
+    historical_sessions: int
+    recent_sessions: int
+    insufficient_data: bool
+    signal_distribution: DistributionComparisonModel | None
+    factor_distribution: DistributionComparisonModel | None
+    regime_distribution: DistributionComparisonModel | None
+    methodology: str
+    meta: DataMeta
+
+
 # ------------------------------------------------------- Model vs Model
 
 class ModelComparisonRequest(BaseModel):
