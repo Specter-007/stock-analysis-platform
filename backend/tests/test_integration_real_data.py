@@ -16,6 +16,28 @@ REAL_TICKERS = ["AAPL", "MSFT", "NVDA"]
 
 client = TestClient(app)
 
+_TEST_USER_EMAIL = "integration-test@example.com"
+_TEST_USER_PASSWORD = "integrationtest1"
+
+
+def _ensure_authenticated() -> None:
+    """Registers (or, on repeat runs against the same persistent dev
+    database, logs in as) a fixed test account so the now-auth-gated
+    watchlist/paper-trading/experiment endpoints are reachable exactly as a
+    real signed-in user would reach them - never bypassing auth for tests.
+    """
+    resp = client.post(
+        "/api/auth/register",
+        json={"email": _TEST_USER_EMAIL, "password": _TEST_USER_PASSWORD, "display_name": "Integration Test"},
+    )
+    if resp.status_code == 409:
+        resp = client.post("/api/auth/login", json={"email": _TEST_USER_EMAIL, "password": _TEST_USER_PASSWORD})
+    assert resp.status_code in (200, 201), resp.text
+
+
+def _csrf_headers() -> dict:
+    return {"X-CSRF-Token": client.cookies.get("csrf_token")}
+
 
 def _network_available() -> bool:
     try:
@@ -26,6 +48,9 @@ def _network_available() -> bool:
 
 
 pytestmark = pytest.mark.skipif(not _network_available(), reason="No network access to Yahoo Finance in this environment.")
+
+if _network_available():
+    _ensure_authenticated()
 
 
 @pytest.mark.parametrize("ticker", REAL_TICKERS)
@@ -158,12 +183,15 @@ def test_real_history_range_returns_candles():
 
 def test_real_paper_trade_uses_real_live_quote():
     portfolio_id = "integration_test_portfolio"
-    reset_resp = client.post(f"/api/paper-portfolio/reset?portfolio_id={portfolio_id}&starting_capital=10000")
+    reset_resp = client.post(
+        f"/api/paper-portfolio/reset?portfolio_id={portfolio_id}&starting_capital=10000", headers=_csrf_headers()
+    )
     assert reset_resp.status_code == 200
 
     buy_resp = client.post(
         "/api/paper-trade",
         json={"portfolio_id": portfolio_id, "ticker": "AAPL", "action": "BUY", "shares": 1},
+        headers=_csrf_headers(),
     )
     assert buy_resp.status_code == 200
     body = buy_resp.json()
@@ -239,15 +267,17 @@ def test_real_data_quality_reported_in_meta():
 
 def test_real_watchlist_end_to_end():
     watchlist_id = "integration_test_watchlist"
-    client.delete(f"/api/watchlist/AAPL?watchlist_id={watchlist_id}")  # ensure clean slate
-    add_resp = client.post("/api/watchlist", json={"watchlist_id": watchlist_id, "ticker": "AAPL"})
+    client.delete(f"/api/watchlist/AAPL?watchlist_id={watchlist_id}", headers=_csrf_headers())  # ensure clean slate
+    add_resp = client.post(
+        "/api/watchlist", json={"watchlist_id": watchlist_id, "ticker": "AAPL"}, headers=_csrf_headers()
+    )
     assert add_resp.status_code == 200
     body = add_resp.json()
     entry = next(e for e in body["entries"] if e["ticker"] == "AAPL")
     assert entry["price"] is not None
     assert entry["signal"] in ("STRONG_BUY", "BUY", "HOLD", "SELL", "STRONG_SELL")
 
-    remove_resp = client.delete(f"/api/watchlist/AAPL?watchlist_id={watchlist_id}")
+    remove_resp = client.delete(f"/api/watchlist/AAPL?watchlist_id={watchlist_id}", headers=_csrf_headers())
     assert remove_resp.status_code == 200
     assert remove_resp.json()["tickers"] == []
 
@@ -302,7 +332,7 @@ def test_real_sensitivity_heatmap():
 
 def test_real_paper_portfolio_history_records_a_snapshot():
     portfolio_id = "integration_test_history"
-    client.post(f"/api/paper-portfolio/reset?portfolio_id={portfolio_id}&starting_capital=10000")
+    client.post(f"/api/paper-portfolio/reset?portfolio_id={portfolio_id}&starting_capital=10000", headers=_csrf_headers())
     resp = client.get(f"/api/paper-portfolio/history?portfolio_id={portfolio_id}")
     assert resp.status_code == 200
     body = resp.json()
@@ -312,7 +342,7 @@ def test_real_paper_portfolio_history_records_a_snapshot():
 
 def test_real_forward_validation_reports_honest_sample_size():
     portfolio_id = "integration_test_forward"
-    client.post(f"/api/paper-portfolio/reset?portfolio_id={portfolio_id}&starting_capital=10000")
+    client.post(f"/api/paper-portfolio/reset?portfolio_id={portfolio_id}&starting_capital=10000", headers=_csrf_headers())
     resp = client.get(f"/api/paper-portfolio/forward-validation?portfolio_id={portfolio_id}")
     assert resp.status_code == 200
     body = resp.json()
@@ -425,13 +455,14 @@ def test_real_experiment_full_lifecycle():
                 "initial_capital": 10000, "run_out_of_sample": True,
             },
         },
+        headers=_csrf_headers(),
     )
     assert create_resp.status_code == 200
     experiment_id = create_resp.json()["id"]
     fingerprint = create_resp.json()["fingerprint"]
 
     try:
-        run_resp = client.post(f"/api/experiments/{experiment_id}/run")
+        run_resp = client.post(f"/api/experiments/{experiment_id}/run", headers=_csrf_headers())
         assert run_resp.status_code == 200
         ran = run_resp.json()
         assert ran["status"] in ("VALIDATED", "COMPLETED")
@@ -441,15 +472,15 @@ def test_real_experiment_full_lifecycle():
         reopened = client.get(f"/api/experiments/{experiment_id}").json()
         assert reopened["fingerprint"] == fingerprint  # unchanged by running
 
-        dup_resp = client.post(f"/api/experiments/{experiment_id}/duplicate", json={})
+        dup_resp = client.post(f"/api/experiments/{experiment_id}/duplicate", json={}, headers=_csrf_headers())
         assert dup_resp.status_code == 200
         assert dup_resp.json()["fingerprint"] == fingerprint
-        client.delete(f"/api/experiments/{dup_resp.json()['id']}")
+        client.delete(f"/api/experiments/{dup_resp.json()['id']}", headers=_csrf_headers())
 
         list_resp = client.get("/api/experiments")
         assert experiment_id in [row["experiment"]["id"] for row in list_resp.json()["experiments"]]
     finally:
-        client.delete(f"/api/experiments/{experiment_id}")
+        client.delete(f"/api/experiments/{experiment_id}", headers=_csrf_headers())
 
 
 def test_real_paper_portfolios_listing():

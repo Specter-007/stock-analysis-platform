@@ -13,6 +13,8 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass, field
 
+from sqlalchemy.orm import Session
+
 from app.config import (
     MODEL_VERSION_CURRENT,
     PAPER_TRADING_COMMISSION_BPS,
@@ -245,31 +247,29 @@ def _maybe_record_snapshot(portfolio_id: str, state: dict, view: PortfolioView) 
     return True
 
 
-def get_portfolio(portfolio_id: str) -> PortfolioView:
-    _apply_pending_exits(portfolio_id)
-    state = load_portfolio(portfolio_id)
+def get_portfolio(db: Session, user_id: str, portfolio_id: str) -> PortfolioView:
+    _apply_pending_exits(db, user_id, portfolio_id)
+    state = load_portfolio(db, user_id, portfolio_id)
     view = _build_view(state)
     if _maybe_record_snapshot(portfolio_id, state, view):
-        save_portfolio(portfolio_id, state)
+        save_portfolio(db, user_id, portfolio_id, state)
     return view
 
 
-def list_portfolios() -> list[PortfolioView]:
-    """V5: every portfolio that has ever been saved (directory listing, not
-    a separate index - see paper_trading.store.list_portfolio_ids), each
-    resolved through the normal get_portfolio() path so auto-exit checks
-    and equity snapshots are applied consistently with single-portfolio
-    reads.
+def list_portfolios(db: Session, user_id: str) -> list[PortfolioView]:
+    """V5: every portfolio this user has ever saved, each resolved through
+    the normal get_portfolio() path so auto-exit checks and equity
+    snapshots are applied consistently with single-portfolio reads.
     """
-    return [get_portfolio(portfolio_id) for portfolio_id in list_portfolio_ids()]
+    return [get_portfolio(db, user_id, portfolio_id) for portfolio_id in list_portfolio_ids(db, user_id)]
 
 
-def get_equity_history(portfolio_id: str) -> EquityHistoryView:
+def get_equity_history(db: Session, user_id: str, portfolio_id: str) -> EquityHistoryView:
     # Forces an opportunistic snapshot attempt for "today" before reading,
     # so a fresh page load always reflects the latest available trading day
     # rather than whatever was last recorded.
-    get_portfolio(portfolio_id)
-    state = load_portfolio(portfolio_id)
+    get_portfolio(db, user_id, portfolio_id)
+    state = load_portfolio(db, user_id, portfolio_id)
     return EquityHistoryView(
         portfolio_id=state["portfolio_id"],
         starting_capital=state["starting_capital"],
@@ -395,13 +395,13 @@ def _close_position(
     )
 
 
-def _apply_pending_exits(portfolio_id: str) -> None:
+def _apply_pending_exits(db: Session, user_id: str, portfolio_id: str) -> None:
     """Checks every open position's stop-loss/take-profit/trailing-stop
     against the CURRENT live price and auto-closes any that trigger. Applied
     every time the portfolio is loaded, so a trigger is caught on the next
     view rather than requiring a background process.
     """
-    state = load_portfolio(portfolio_id)
+    state = load_portfolio(db, user_id, portfolio_id)
     positions = state["positions"]
     changed = False
 
@@ -433,10 +433,12 @@ def _apply_pending_exits(portfolio_id: str) -> None:
             changed = True
 
     if changed:
-        save_portfolio(portfolio_id, state)
+        save_portfolio(db, user_id, portfolio_id, state)
 
 
 def execute_trade(
+    db: Session,
+    user_id: str,
     portfolio_id: str,
     ticker: str,
     action: str,
@@ -449,7 +451,7 @@ def execute_trade(
     trailing_stop_percent: float | None = None,
     max_position_percent: float = PAPER_TRADING_DEFAULT_MAX_POSITION_PERCENT,
 ) -> PortfolioView:
-    _apply_pending_exits(portfolio_id)
+    _apply_pending_exits(db, user_id, portfolio_id)
 
     ticker = normalize_and_validate_ticker(ticker)
     action = action.upper()
@@ -460,7 +462,7 @@ def execute_trade(
     if raw_price is None:
         raise TickerNotFoundError(ticker)
 
-    state = load_portfolio(portfolio_id)
+    state = load_portfolio(db, user_id, portfolio_id)
     positions = state["positions"]
 
     if action == "BUY":
@@ -548,25 +550,25 @@ def execute_trade(
             raise PaperTradingError("Shares must be a positive number.")
         _close_position(state, ticker, shares, raw_price, "MANUAL_PAPER_EXIT")
 
-    save_portfolio(portfolio_id, state)
-    return get_portfolio(portfolio_id)
+    save_portfolio(db, user_id, portfolio_id, state)
+    return get_portfolio(db, user_id, portfolio_id)
 
 
-def close_all_positions(portfolio_id: str, exit_reason: str = "END_OF_TEST") -> PortfolioView:
+def close_all_positions(db: Session, user_id: str, portfolio_id: str, exit_reason: str = "END_OF_TEST") -> PortfolioView:
     """Liquidates every open position at the current live price - used, for
     example, to mark a research session's end without leaving positions
     open indefinitely."""
-    _apply_pending_exits(portfolio_id)
-    state = load_portfolio(portfolio_id)
+    _apply_pending_exits(db, user_id, portfolio_id)
+    state = load_portfolio(db, user_id, portfolio_id)
     for ticker in list(state["positions"].keys()):
         price = _current_price(ticker)
         if price is None:
             continue
         _close_position(state, ticker, state["positions"][ticker]["shares"], price, exit_reason)
-    save_portfolio(portfolio_id, state)
-    return get_portfolio(portfolio_id)
+    save_portfolio(db, user_id, portfolio_id, state)
+    return get_portfolio(db, user_id, portfolio_id)
 
 
-def reset(portfolio_id: str, starting_capital: float | None = None) -> PortfolioView:
-    reset_portfolio(portfolio_id, starting_capital)
-    return get_portfolio(portfolio_id)
+def reset(db: Session, user_id: str, portfolio_id: str, starting_capital: float | None = None) -> PortfolioView:
+    reset_portfolio(db, user_id, portfolio_id, starting_capital)
+    return get_portfolio(db, user_id, portfolio_id)

@@ -70,6 +70,8 @@ def test_deleting_user_cascades_to_owned_rows(db_session):
             fingerprint="AAAA-BBBB-CCCC-DDDD",
             config={},
             results={},
+            created_at="2026-01-01T00:00:00+00:00",
+            updated_at="2026-01-01T00:00:00+00:00",
         )
     )
     db_session.add(Notification(user_id=user.id, type="SYSTEM", title="t", message="m"))

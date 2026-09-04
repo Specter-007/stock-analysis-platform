@@ -1,8 +1,8 @@
 """initial schema: users, sessions, tokens, preferences, notifications, support, watchlists, paper portfolios, experiments
 
-Revision ID: 3490bd36545c
+Revision ID: cb1a80dc4184
 Revises: 
-Create Date: 2026-09-04 11:19:24.118728
+Create Date: 2026-09-04 11:41:44.268670
 
 """
 from typing import Sequence, Union
@@ -13,7 +13,7 @@ from sqlalchemy import Text
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '3490bd36545c'
+revision: str = 'cb1a80dc4184'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -65,8 +65,8 @@ def upgrade() -> None:
     sa.Column('forward_portfolio_id', sa.String(length=64), nullable=True),
     sa.Column('reproduced_from', sa.String(length=40), nullable=True),
     sa.Column('archived', sa.Boolean(), nullable=False),
-    sa.Column('created_at', sa.DateTime(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(), nullable=False),
+    sa.Column('created_at', sa.String(length=40), nullable=False),
+    sa.Column('updated_at', sa.String(length=40), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )

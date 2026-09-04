@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sqlalchemy.orm import Session
+
 from app.config import MODEL_VERSION_CURRENT
 from app.paper_trading import service as paper_trading_service
 
@@ -77,9 +79,9 @@ def _max_drawdown_percent(equities: list[float]) -> float | None:
     return round(worst_dd, 2)
 
 
-def get_forward_validation(portfolio_id: str) -> ForwardValidationView:
-    view = paper_trading_service.get_portfolio(portfolio_id)
-    history = paper_trading_service.get_equity_history(portfolio_id)
+def get_forward_validation(db: Session, user_id: str, portfolio_id: str) -> ForwardValidationView:
+    view = paper_trading_service.get_portfolio(db, user_id, portfolio_id)
+    history = paper_trading_service.get_equity_history(db, user_id, portfolio_id)
 
     snapshots = history.snapshots
     trading_days_observed = len(snapshots)

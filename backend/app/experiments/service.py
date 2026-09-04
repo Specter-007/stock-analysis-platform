@@ -16,6 +16,7 @@ import datetime as dt
 from dataclasses import asdict
 
 import pandas as pd
+from sqlalchemy.orm import Session
 
 from app.backtesting.cost_stress import run_cost_stress_test
 from app.backtesting.engine import run_backtest
@@ -72,7 +73,9 @@ def _now_iso() -> str:
     return timeutils.to_iso(timeutils.utc_now())
 
 
-def create_experiment(config: ExperimentConfig, name: str, notes: str = "", tags: list[str] | None = None) -> Experiment:
+def create_experiment(
+    db: Session, user_id: str, config: ExperimentConfig, name: str, notes: str = "", tags: list[str] | None = None
+) -> Experiment:
     now = _now_iso()
     experiment = Experiment(
         id=store.new_experiment_id(),
@@ -85,25 +88,25 @@ def create_experiment(config: ExperimentConfig, name: str, notes: str = "", tags
         notes=notes,
         tags=list(tags or []),
     )
-    store.save_experiment(experiment)
+    store.save_experiment(db, user_id, experiment)
     return experiment
 
 
-def get_experiment(experiment_id: str) -> Experiment | None:
-    return store.load_experiment(experiment_id)
+def get_experiment(db: Session, user_id: str, experiment_id: str) -> Experiment | None:
+    return store.load_experiment(db, user_id, experiment_id)
 
 
-def delete_experiment(experiment_id: str) -> bool:
-    return store.delete_experiment(experiment_id)
+def delete_experiment(db: Session, user_id: str, experiment_id: str) -> bool:
+    return store.delete_experiment(db, user_id, experiment_id)
 
 
-def update_notes(experiment_id: str, notes: str | None = None, tags: list[str] | None = None) -> Experiment:
+def update_notes(db: Session, user_id: str, experiment_id: str, notes: str | None = None, tags: list[str] | None = None) -> Experiment:
     """Notes and tags are research metadata, not part of what makes an
     experiment reproducible (the fingerprint explicitly excludes them) - so
     editing them after the fact never changes the fingerprint or requires
     re-running anything.
     """
-    experiment = store.load_experiment(experiment_id)
+    experiment = store.load_experiment(db, user_id, experiment_id)
     if experiment is None:
         raise ValueError(f"Experiment not found: {experiment_id}")
     if notes is not None:
@@ -111,22 +114,22 @@ def update_notes(experiment_id: str, notes: str | None = None, tags: list[str] |
     if tags is not None:
         experiment.tags = list(tags)
     experiment.updated_at = _now_iso()
-    store.save_experiment(experiment)
+    store.save_experiment(db, user_id, experiment)
     return experiment
 
 
-def archive_experiment(experiment_id: str, archived: bool = True) -> Experiment:
-    experiment = store.load_experiment(experiment_id)
+def archive_experiment(db: Session, user_id: str, experiment_id: str, archived: bool = True) -> Experiment:
+    experiment = store.load_experiment(db, user_id, experiment_id)
     if experiment is None:
         raise ValueError(f"Experiment not found: {experiment_id}")
     experiment.archived = archived
     experiment.updated_at = _now_iso()
-    store.save_experiment(experiment)
+    store.save_experiment(db, user_id, experiment)
     return experiment
 
 
-def duplicate_experiment(source_id: str, new_name: str | None = None) -> Experiment:
-    source = store.load_experiment(source_id)
+def duplicate_experiment(db: Session, user_id: str, source_id: str, new_name: str | None = None) -> Experiment:
+    source = store.load_experiment(db, user_id, source_id)
     if source is None:
         raise ValueError(f"Experiment not found: {source_id}")
     now = _now_iso()
@@ -142,7 +145,7 @@ def duplicate_experiment(source_id: str, new_name: str | None = None) -> Experim
         tags=list(source.tags),
         reproduced_from=source.id,
     )
-    store.save_experiment(duplicate)
+    store.save_experiment(db, user_id, duplicate)
     return duplicate
 
 
@@ -150,14 +153,14 @@ def _group_key(config: ExperimentConfig) -> str:
     return "|".join([",".join(sorted(config.tickers)), config.start_date, config.end_date])
 
 
-def list_experiments(include_archived: bool = False) -> list[dict]:
+def list_experiments(db: Session, user_id: str, include_archived: bool = False) -> list[dict]:
     """Returns each experiment alongside its research-history group's
     experiment count, so a caller reusing the same (universe, period) many
     times over is visible rather than hidden - see EXPERIMENT_DATA_MINING_
     WARNING_THRESHOLD. This never blocks or corrects the behavior; it only
     discloses it.
     """
-    experiments = store.list_experiments()
+    experiments = store.list_experiments(db, user_id)
     if not include_archived:
         experiments = [e for e in experiments if not e.archived]
 
@@ -334,6 +337,8 @@ def _run_cost_stress_validation(ticker: str, full_df: pd.DataFrame, start_date: 
 
 
 def run_experiment(
+    db: Session,
+    user_id: str,
     experiment_id: str,
     price_data: dict[str, pd.DataFrame],
     benchmark_df: pd.DataFrame | None,
@@ -342,13 +347,13 @@ def run_experiment(
     data_status: str = "HISTORICAL",
     latest_market_timestamp: str | None = None,
 ) -> Experiment:
-    experiment = store.load_experiment(experiment_id)
+    experiment = store.load_experiment(db, user_id, experiment_id)
     if experiment is None:
         raise ValueError(f"Experiment not found: {experiment_id}")
 
     experiment.status = STATUS_RUNNING
     experiment.updated_at = _now_iso()
-    store.save_experiment(experiment)  # persisted immediately: a crash mid-run leaves this visible, not silently stuck at DRAFT
+    store.save_experiment(db, user_id, experiment)  # persisted immediately: a crash mid-run leaves this visible, not silently stuck at DRAFT
 
     config = experiment.config
     start_date = dt.date.fromisoformat(config.start_date)
@@ -382,7 +387,7 @@ def run_experiment(
         experiment.status = STATUS_FAILED
         experiment.error = f"Backtest failed: {exc}"
         experiment.updated_at = _now_iso()
-        store.save_experiment(experiment)
+        store.save_experiment(db, user_id, experiment)
         return experiment
 
     requested_and_outcomes: list[tuple[bool, ValidationOutcome]] = []
@@ -433,38 +438,38 @@ def run_experiment(
     all_requested_succeeded = all(outcome.completed for _, outcome in requested_and_outcomes)
     experiment.status = STATUS_VALIDATED if all_requested_succeeded else STATUS_COMPLETED
     experiment.updated_at = _now_iso()
-    store.save_experiment(experiment)
+    store.save_experiment(db, user_id, experiment)
     return experiment
 
 
 # ------------------------------------------------------- Forward simulation
 
 
-def start_forward_simulation(experiment_id: str) -> Experiment:
-    experiment = store.load_experiment(experiment_id)
+def start_forward_simulation(db: Session, user_id: str, experiment_id: str) -> Experiment:
+    experiment = store.load_experiment(db, user_id, experiment_id)
     if experiment is None:
         raise ValueError(f"Experiment not found: {experiment_id}")
     if experiment.config.is_portfolio:
         raise ValueError(FORWARD_SIM_UNSUPPORTED_MESSAGE)
 
     portfolio_id = experiment.id  # already carries the "exp_" prefix from store.new_experiment_id()
-    paper_trading_service.reset(portfolio_id, experiment.config.initial_capital)
+    paper_trading_service.reset(db, user_id, portfolio_id, experiment.config.initial_capital)
 
     experiment.forward_portfolio_id = portfolio_id
     experiment.status = STATUS_PAPER_FORWARD_TEST
     experiment.updated_at = _now_iso()
-    store.save_experiment(experiment)
+    store.save_experiment(db, user_id, experiment)
     return experiment
 
 
 # ---------------------------------------------------------------- Compare
 
 
-def compare_experiments(experiment_ids: list[str]) -> dict:
+def compare_experiments(db: Session, user_id: str, experiment_ids: list[str]) -> dict:
     experiments = []
     missing = []
     for exp_id in experiment_ids:
-        exp = store.load_experiment(exp_id)
+        exp = store.load_experiment(db, user_id, exp_id)
         if exp is None:
             missing.append(exp_id)
         else:
@@ -535,8 +540,8 @@ def _historical_expectation(experiment: Experiment) -> tuple[dict | None, str | 
     return None, None
 
 
-def _forward_sharpe(portfolio_id: str) -> float | None:
-    history = paper_trading_service.get_equity_history(portfolio_id)
+def _forward_sharpe(db: Session, user_id: str, portfolio_id: str) -> float | None:
+    history = paper_trading_service.get_equity_history(db, user_id, portfolio_id)
     if len(history.snapshots) < 5:
         return None
 
@@ -544,8 +549,8 @@ def _forward_sharpe(portfolio_id: str) -> float | None:
     return backtest_metrics.sharpe_ratio(equity.pct_change())
 
 
-def get_forward_vs_historical(experiment_id: str) -> dict:
-    experiment = store.load_experiment(experiment_id)
+def get_forward_vs_historical(db: Session, user_id: str, experiment_id: str) -> dict:
+    experiment = store.load_experiment(db, user_id, experiment_id)
     if experiment is None:
         raise ValueError(f"Experiment not found: {experiment_id}")
 
@@ -560,12 +565,12 @@ def get_forward_vs_historical(experiment_id: str) -> dict:
             "deviation_notes": [],
         }
 
-    fv = forward_validation.get_forward_validation(experiment.forward_portfolio_id)
+    fv = forward_validation.get_forward_validation(db, user_id, experiment.forward_portfolio_id)
     historical, historical_source = _historical_expectation(experiment)
 
     forward = {
         "return_percent": fv.total_return_percent,
-        "sharpe_ratio": _forward_sharpe(experiment.forward_portfolio_id),
+        "sharpe_ratio": _forward_sharpe(db, user_id, experiment.forward_portfolio_id),
         "max_drawdown_percent": fv.max_drawdown_percent,
         "trading_days_observed": fv.trading_days_observed,
     }

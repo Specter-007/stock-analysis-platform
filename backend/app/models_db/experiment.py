@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
-
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
-from app.db.timeutil import utcnow_naive as _utcnow
 from app.db.types import portable_json
 
 
@@ -33,7 +30,10 @@ class ExperimentDB(Base):
     forward_portfolio_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     reproduced_from: Mapped[str | None] = mapped_column(String(40), nullable=True)
     archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
-    )
+    # Stored as the same ISO-8601 UTC string app.experiments.service already
+    # computes (app.utils.timeutils.to_iso) - avoids a redundant datetime<->
+    # string conversion layer since the service, not the DB, owns these
+    # timestamps (e.g. updated_at changes on notes/status edits, not only on
+    # row writes).
+    created_at: Mapped[str] = mapped_column(String(40), nullable=False)
+    updated_at: Mapped[str] = mapped_column(String(40), nullable=False)

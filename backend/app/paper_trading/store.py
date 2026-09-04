@@ -1,26 +1,28 @@
-"""Simple JSON-file-backed persistence for paper-trading portfolios.
+"""PostgreSQL-backed (SQLAlchemy) persistence for paper-trading portfolios,
+scoped per user.
 
-Deliberately not a database: this is a single-process simulation feature,
-not a multi-user brokerage. A small JSON file per portfolio is durable
-across backend restarts without introducing any new infrastructure.
+Replaces the earlier JSON-file store (see docs/MIGRATION.md for the
+one-time import of any pre-existing single-user JSON portfolio data). The
+entire state dict shape is unchanged - it is simply the JSON payload of a
+PaperPortfolioDB.state column now instead of a `<id>.json` file - so the
+math/business logic in app.paper_trading.service (position sizing, cost
+accounting, equity snapshots) is untouched. `portfolio_id` is treated as a
+"slug" (e.g. "default") looked up together with the authenticated user's
+id, so two users can each have their own "default" portfolio.
 """
 from __future__ import annotations
 
-import json
-import threading
-from pathlib import Path
+from sqlalchemy.orm import Session
 
-from app.config import PAPER_TRADING_DATA_DIR, PAPER_TRADING_DEFAULT_CAPITAL
+from app.config import PAPER_TRADING_DEFAULT_CAPITAL
+from app.models_db.paper_trading import PaperPortfolioDB
 
-_LOCK = threading.Lock()
-
-# Resolved relative to the backend/ working directory the app is run from.
-_DATA_DIR = Path(PAPER_TRADING_DATA_DIR)
+_MAX_SLUG_LENGTH = 64
 
 
-def _portfolio_path(portfolio_id: str) -> Path:
-    safe_id = "".join(c for c in portfolio_id if c.isalnum() or c in ("-", "_")) or "default"
-    return _DATA_DIR / f"{safe_id}.json"
+def _sanitize_slug(portfolio_id: str) -> str:
+    safe = "".join(c for c in portfolio_id if c.isalnum() or c in ("-", "_")) or "default"
+    return safe[:_MAX_SLUG_LENGTH]
 
 
 def _default_state(portfolio_id: str) -> dict:
@@ -42,40 +44,37 @@ def _default_state(portfolio_id: str) -> dict:
     }
 
 
-def load_portfolio(portfolio_id: str) -> dict:
-    path = _portfolio_path(portfolio_id)
-    with _LOCK:
-        if not path.exists():
-            return _default_state(portfolio_id)
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return _default_state(portfolio_id)
+def _get_row(db: Session, user_id: str, portfolio_id: str) -> PaperPortfolioDB | None:
+    slug = _sanitize_slug(portfolio_id)
+    return db.query(PaperPortfolioDB).filter_by(user_id=user_id, slug=slug).one_or_none()
 
 
-def save_portfolio(portfolio_id: str, state: dict) -> None:
-    path = _portfolio_path(portfolio_id)
-    with _LOCK:
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+def load_portfolio(db: Session, user_id: str, portfolio_id: str) -> dict:
+    row = _get_row(db, user_id, portfolio_id)
+    return dict(row.state) if row is not None else _default_state(portfolio_id)
 
 
-def reset_portfolio(portfolio_id: str, starting_capital: float | None = None) -> dict:
+def save_portfolio(db: Session, user_id: str, portfolio_id: str, state: dict) -> None:
+    row = _get_row(db, user_id, portfolio_id)
+    if row is None:
+        db.add(PaperPortfolioDB(user_id=user_id, slug=_sanitize_slug(portfolio_id), state=dict(state)))
+    else:
+        row.state = dict(state)
+    db.commit()
+
+
+def reset_portfolio(db: Session, user_id: str, portfolio_id: str, starting_capital: float | None = None) -> dict:
     state = _default_state(portfolio_id)
     if starting_capital is not None:
         state["starting_capital"] = starting_capital
         state["cash"] = starting_capital
-    save_portfolio(portfolio_id, state)
+    save_portfolio(db, user_id, portfolio_id, state)
     return state
 
 
-def list_portfolio_ids() -> list[str]:
-    """V5: enumerates every portfolio that has ever been saved, so the
-    Multi-Simulation UI can list them without a separate index file (which
-    could otherwise drift out of sync with the files it describes) - the
-    directory of JSON files IS the index.
-    """
-    with _LOCK:
-        if not _DATA_DIR.exists():
-            return []
-        return sorted(p.stem for p in _DATA_DIR.glob("*.json"))
+def list_portfolio_ids(db: Session, user_id: str) -> list[str]:
+    """Every portfolio slug this user has ever saved - the DB rows scoped to
+    this user ARE the index, mirroring the old JSON-directory-listing
+    approach (see the V5 changelog) but now naturally per-user."""
+    rows = db.query(PaperPortfolioDB.slug).filter_by(user_id=user_id).order_by(PaperPortfolioDB.slug).all()
+    return [r[0] for r in rows]

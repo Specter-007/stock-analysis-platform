@@ -4,9 +4,12 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+from sqlalchemy.orm import Session
 
+from app.auth.dependencies import get_current_user, require_csrf
+from app.db.base import get_db
 from app.experiments import service
 from app.experiments.models import Experiment, ExperimentConfig
 from app.models.schemas import (
@@ -26,6 +29,7 @@ from app.models.schemas import (
     UpdateExperimentNotesRequest,
     ValidationOutcomeModel,
 )
+from app.models_db.user import User
 from app.services import market_data
 from app.utils.validation import normalize_and_validate_ticker
 
@@ -93,23 +97,35 @@ def _experiment_to_response(exp: Experiment) -> ExperimentResponse:
     )
 
 
-def _get_or_404(experiment_id: str) -> Experiment:
-    exp = service.get_experiment(experiment_id)
+def _get_or_404(db: Session, user_id: str, experiment_id: str) -> Experiment:
+    # Returns the identical 404 whether the experiment doesn't exist at all
+    # or belongs to a different user - see app.experiments.store.load_experiment
+    # and the IDOR-prevention rationale in app.auth.exceptions.
+    exp = service.get_experiment(db, user_id, experiment_id)
     if exp is None:
         raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found.")
     return exp
 
 
 @router.post("", response_model=ExperimentResponse)
-def create_experiment(request: CreateExperimentRequest):
+def create_experiment(
+    request: CreateExperimentRequest,
+    user: User = Depends(get_current_user),
+    _csrf: User = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
     config = _config_model_to_dataclass(request.config)
-    exp = service.create_experiment(config, name=request.name, notes=request.notes, tags=request.tags)
+    exp = service.create_experiment(db, user.id, config, name=request.name, notes=request.notes, tags=request.tags)
     return _experiment_to_response(exp)
 
 
 @router.get("", response_model=ExperimentListResponse)
-def list_experiments(include_archived: bool = Query(default=False)):
-    rows = service.list_experiments(include_archived=include_archived)
+def list_experiments(
+    include_archived: bool = Query(default=False),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    rows = service.list_experiments(db, user.id, include_archived=include_archived)
     return ExperimentListResponse(
         experiments=[
             ExperimentListRowModel(
@@ -123,20 +139,30 @@ def list_experiments(include_archived: bool = Query(default=False)):
 
 
 @router.get("/{experiment_id}", response_model=ExperimentResponse)
-def get_experiment(experiment_id: str):
-    return _experiment_to_response(_get_or_404(experiment_id))
+def get_experiment(experiment_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _experiment_to_response(_get_or_404(db, user.id, experiment_id))
 
 
 @router.delete("/{experiment_id}")
-def delete_experiment(experiment_id: str):
-    if not service.delete_experiment(experiment_id):
+def delete_experiment(
+    experiment_id: str,
+    user: User = Depends(get_current_user),
+    _csrf: User = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    if not service.delete_experiment(db, user.id, experiment_id):
         raise HTTPException(status_code=404, detail=f"Experiment '{experiment_id}' not found.")
     return {"deleted": True, "id": experiment_id}
 
 
 @router.post("/{experiment_id}/run", response_model=ExperimentResponse)
-def run_experiment(experiment_id: str):
-    experiment = _get_or_404(experiment_id)
+def run_experiment(
+    experiment_id: str,
+    user: User = Depends(get_current_user),
+    _csrf: User = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    experiment = _get_or_404(db, user.id, experiment_id)
     config = experiment.config
 
     all_symbols = list(dict.fromkeys(config.tickers + [config.benchmark]))
@@ -166,6 +192,8 @@ def run_experiment(experiment_id: str):
         latest_ts = str(any_df.index[-1])
 
     ran = service.run_experiment(
+        db,
+        user.id,
         experiment_id=experiment_id,
         price_data=price_data,
         benchmark_df=benchmark_df if benchmark_df is not None and not benchmark_df.empty else None,
@@ -185,40 +213,65 @@ def _safe_fetch(ticker: str):
 
 
 @router.patch("/{experiment_id}/notes", response_model=ExperimentResponse)
-def update_experiment_notes(experiment_id: str, request: UpdateExperimentNotesRequest):
-    _get_or_404(experiment_id)
-    updated = service.update_notes(experiment_id, notes=request.notes, tags=request.tags)
+def update_experiment_notes(
+    experiment_id: str,
+    request: UpdateExperimentNotesRequest,
+    user: User = Depends(get_current_user),
+    _csrf: User = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    _get_or_404(db, user.id, experiment_id)
+    updated = service.update_notes(db, user.id, experiment_id, notes=request.notes, tags=request.tags)
     return _experiment_to_response(updated)
 
 
 @router.post("/{experiment_id}/duplicate", response_model=ExperimentResponse)
-def duplicate_experiment(experiment_id: str, request: DuplicateExperimentRequest):
-    _get_or_404(experiment_id)
-    duplicate = service.duplicate_experiment(experiment_id, new_name=request.new_name)
+def duplicate_experiment(
+    experiment_id: str,
+    request: DuplicateExperimentRequest,
+    user: User = Depends(get_current_user),
+    _csrf: User = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    _get_or_404(db, user.id, experiment_id)
+    duplicate = service.duplicate_experiment(db, user.id, experiment_id, new_name=request.new_name)
     return _experiment_to_response(duplicate)
 
 
 @router.post("/{experiment_id}/archive", response_model=ExperimentResponse)
-def archive_experiment(experiment_id: str, request: ArchiveExperimentRequest):
-    _get_or_404(experiment_id)
-    updated = service.archive_experiment(experiment_id, archived=request.archived)
+def archive_experiment(
+    experiment_id: str,
+    request: ArchiveExperimentRequest,
+    user: User = Depends(get_current_user),
+    _csrf: User = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    _get_or_404(db, user.id, experiment_id)
+    updated = service.archive_experiment(db, user.id, experiment_id, archived=request.archived)
     return _experiment_to_response(updated)
 
 
 @router.post("/{experiment_id}/forward-simulation", response_model=ExperimentResponse)
-def start_forward_simulation(experiment_id: str):
-    _get_or_404(experiment_id)
+def start_forward_simulation(
+    experiment_id: str,
+    user: User = Depends(get_current_user),
+    _csrf: User = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    _get_or_404(db, user.id, experiment_id)
     try:
-        updated = service.start_forward_simulation(experiment_id)
+        updated = service.start_forward_simulation(db, user.id, experiment_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _experiment_to_response(updated)
 
 
 @router.post("/compare", response_model=CompareExperimentsResponse)
-def compare_experiments(request: CompareExperimentsRequest):
+def compare_experiments(
+    request: CompareExperimentsRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
     try:
-        result = service.compare_experiments(request.experiment_ids)
+        result = service.compare_experiments(db, user.id, request.experiment_ids)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return CompareExperimentsResponse(
@@ -228,10 +281,12 @@ def compare_experiments(request: CompareExperimentsRequest):
 
 
 @router.get("/{experiment_id}/forward-vs-historical", response_model=ForwardVsHistoricalResponse)
-def get_forward_vs_historical(experiment_id: str):
-    _get_or_404(experiment_id)
+def get_forward_vs_historical(
+    experiment_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    _get_or_404(db, user.id, experiment_id)
     try:
-        result = service.get_forward_vs_historical(experiment_id)
+        result = service.get_forward_vs_historical(db, user.id, experiment_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -247,8 +302,8 @@ def get_forward_vs_historical(experiment_id: str):
 
 
 @router.get("/{experiment_id}/export")
-def export_experiment(experiment_id: str):
-    experiment = _get_or_404(experiment_id)
+def export_experiment(experiment_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    experiment = _get_or_404(db, user.id, experiment_id)
     from app.experiments import store as experiments_store
 
     payload = experiments_store.experiment_to_dict(experiment)

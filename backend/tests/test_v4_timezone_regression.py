@@ -19,7 +19,6 @@ from app.backtesting.portfolio import run_portfolio_backtest
 from app.comparison.service import compare_stocks
 from app.model_evaluation.scorecard import build_model_scorecard
 from app.paper_trading import service as paper_trading_service
-from app.paper_trading import store as paper_trading_store
 
 
 def _tz_localize_all(dfs: dict, tz: str = "America/New_York") -> dict:
@@ -135,13 +134,18 @@ def test_model_scorecard_handles_tz_aware_history(monkeypatch):
     assert regime_dim.label in ("STRONG", "MODERATE", "WEAK")
 
 
-def test_paper_trading_snapshot_trading_day_from_tz_aware_benchmark(monkeypatch, tmp_path, ohlcv_long):
+def test_paper_trading_snapshot_trading_day_from_tz_aware_benchmark(monkeypatch, db_session, ohlcv_long):
     """_latest_real_trading_day extracts a plain date() from the benchmark's
     (tz-aware, in production) index - confirm that plain-date extraction
     survives a real tz-aware index rather than only ever being exercised
     against the tz-naive synthetic fixtures used elsewhere.
     """
-    monkeypatch.setattr(paper_trading_store, "_DATA_DIR", tmp_path / "paper_trading")
+    from app.models_db.user import User
+
+    user = User(email="tz-regression-test@example.com", password_hash="x", display_name="Test")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
 
     tz_df = ohlcv_long.tz_localize("America/New_York")
     expected_day = tz_df.index[-1].date()
@@ -151,8 +155,8 @@ def test_paper_trading_snapshot_trading_day_from_tz_aware_benchmark(monkeypatch,
     monkeypatch.setattr(paper_trading_service, "_current_signal_snapshot", lambda ticker: (None, None))
     monkeypatch.setattr(paper_trading_service, "_current_market_regime", lambda: None)
 
-    paper_trading_service.execute_trade("tz_test_portfolio", "AAPL", "BUY", 1)
-    history = paper_trading_service.get_equity_history("tz_test_portfolio")
+    paper_trading_service.execute_trade(db_session, user.id, "tz_test_portfolio", "AAPL", "BUY", 1)
+    history = paper_trading_service.get_equity_history(db_session, user.id, "tz_test_portfolio")
 
     assert len(history.snapshots) == 1
     assert history.snapshots[0].date == expected_day.isoformat()

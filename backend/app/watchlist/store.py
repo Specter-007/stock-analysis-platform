@@ -1,37 +1,47 @@
-"""JSON-file-backed watchlist persistence - same lightweight pattern as
-`app.paper_trading.store` (no database; a small per-watchlist file is
-sufficient for a single-user research tool and durable across restarts).
+"""PostgreSQL-backed (SQLAlchemy) watchlist persistence, scoped per user.
+
+Replaces the earlier JSON-file store (see docs/MIGRATION.md for the
+one-time import of any pre-existing single-user JSON watchlist data). The
+`watchlist_id` a caller supplies is treated as a "slug" - a client-chosen
+name (e.g. "default") - and is always looked up together with the
+authenticated user's id, so two different users can each have their own
+"default" watchlist without collision, and neither can ever read or write
+the other's by guessing/choosing the same slug.
 """
 from __future__ import annotations
 
-import json
-import threading
-from pathlib import Path
+from sqlalchemy.orm import Session
 
-_LOCK = threading.Lock()
-_DATA_DIR = Path("data/watchlists")
+from app.models_db.watchlist import WatchlistDB
 
 DEFAULT_WATCHLIST_ID = "default"
+_MAX_SLUG_LENGTH = 64
 
 
-def _path(watchlist_id: str) -> Path:
-    safe_id = "".join(c for c in watchlist_id if c.isalnum() or c in ("-", "_")) or DEFAULT_WATCHLIST_ID
-    return _DATA_DIR / f"{safe_id}.json"
+def _sanitize_slug(watchlist_id: str) -> str:
+    safe = "".join(c for c in watchlist_id if c.isalnum() or c in ("-", "_")) or DEFAULT_WATCHLIST_ID
+    return safe[:_MAX_SLUG_LENGTH]
 
 
-def load_tickers(watchlist_id: str) -> list[str]:
-    path = _path(watchlist_id)
-    with _LOCK:
-        if not path.exists():
-            return []
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return []
+def _get_row(db: Session, user_id: str, watchlist_id: str) -> WatchlistDB | None:
+    slug = _sanitize_slug(watchlist_id)
+    return db.query(WatchlistDB).filter_by(user_id=user_id, slug=slug).one_or_none()
 
 
-def save_tickers(watchlist_id: str, tickers: list[str]) -> None:
-    path = _path(watchlist_id)
-    with _LOCK:
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(tickers, indent=2), encoding="utf-8")
+def load_tickers(db: Session, user_id: str, watchlist_id: str = DEFAULT_WATCHLIST_ID) -> list[str]:
+    row = _get_row(db, user_id, watchlist_id)
+    return list(row.tickers) if row is not None else []
+
+
+def save_tickers(db: Session, user_id: str, watchlist_id: str, tickers: list[str]) -> None:
+    row = _get_row(db, user_id, watchlist_id)
+    if row is None:
+        db.add(WatchlistDB(user_id=user_id, slug=_sanitize_slug(watchlist_id), tickers=list(tickers)))
+    else:
+        row.tickers = list(tickers)
+    db.commit()
+
+
+def list_watchlist_slugs(db: Session, user_id: str) -> list[str]:
+    rows = db.query(WatchlistDB.slug).filter_by(user_id=user_id).order_by(WatchlistDB.slug).all()
+    return [r[0] for r in rows]

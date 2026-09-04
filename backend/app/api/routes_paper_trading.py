@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
 
+from app.auth.dependencies import get_current_user, require_csrf
 from app.config import PAPER_TRADING_DEFAULT_PORTFOLIO_ID
+from app.db.base import get_db
 from app.models.schemas import (
     ForwardValidationResponse,
     PaperEquityHistoryResponse,
@@ -15,6 +18,7 @@ from app.models.schemas import (
     PaperTradeModel,
     PaperTradeRequest,
 )
+from app.models_db.user import User
 from app.paper_trading import forward_validation
 from app.paper_trading import risk as paper_risk
 from app.paper_trading import service as paper_trading_service
@@ -42,18 +46,20 @@ def _to_response(view) -> PaperPortfolioResponse:
 
 
 @router.get("/paper-portfolio", response_model=PaperPortfolioResponse)
-def get_paper_portfolio(portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID)):
-    view = paper_trading_service.get_portfolio(portfolio_id)
+def get_paper_portfolio(
+    portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    view = paper_trading_service.get_portfolio(db, user.id, portfolio_id)
     return _to_response(view)
 
 
 @router.get("/paper-portfolios", response_model=PaperPortfolioListResponse)
-def list_paper_portfolios():
-    """V5: every paper-trading simulation that exists, for the Multi-
-    Simulation view - a directory listing (see paper_trading.store.
-    list_portfolio_ids), not a separate index that could drift out of sync.
-    """
-    views = paper_trading_service.list_portfolios()
+def list_paper_portfolios(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """V5: every paper-trading simulation this user has, for the
+    Multi-Simulation view."""
+    views = paper_trading_service.list_portfolios(db, user.id)
     return PaperPortfolioListResponse(
         portfolios=[
             PaperPortfolioSummaryModel(
@@ -71,8 +77,15 @@ def list_paper_portfolios():
 
 
 @router.post("/paper-trade", response_model=PaperPortfolioResponse)
-def post_paper_trade(request: PaperTradeRequest):
+def post_paper_trade(
+    request: PaperTradeRequest,
+    user: User = Depends(get_current_user),
+    _csrf: User = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
     view = paper_trading_service.execute_trade(
+        db,
+        user.id,
         portfolio_id=request.portfolio_id,
         ticker=request.ticker,
         action=request.action,
@@ -89,8 +102,12 @@ def post_paper_trade(request: PaperTradeRequest):
 
 
 @router.get("/paper-trades", response_model=list[PaperTradeModel])
-def get_paper_trades(portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID)):
-    view = paper_trading_service.get_portfolio(portfolio_id)
+def get_paper_trades(
+    portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    view = paper_trading_service.get_portfolio(db, user.id, portfolio_id)
     return [PaperTradeModel(**t.__dict__) for t in view.trades]
 
 
@@ -98,27 +115,43 @@ def get_paper_trades(portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_POR
 def reset_paper_portfolio(
     portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID),
     starting_capital: float | None = Query(default=None, gt=0),
+    user: User = Depends(get_current_user),
+    _csrf: User = Depends(require_csrf),
+    db: Session = Depends(get_db),
 ):
-    view = paper_trading_service.reset(portfolio_id, starting_capital)
+    view = paper_trading_service.reset(db, user.id, portfolio_id, starting_capital)
     return _to_response(view)
 
 
 @router.post("/paper-portfolio/close-all", response_model=PaperPortfolioResponse)
-def close_all_paper_positions(portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID)):
-    view = paper_trading_service.close_all_positions(portfolio_id, exit_reason="END_OF_TEST")
+def close_all_paper_positions(
+    portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID),
+    user: User = Depends(get_current_user),
+    _csrf: User = Depends(require_csrf),
+    db: Session = Depends(get_db),
+):
+    view = paper_trading_service.close_all_positions(db, user.id, portfolio_id, exit_reason="END_OF_TEST")
     return _to_response(view)
 
 
 @router.get("/paper-portfolio/risk", response_model=PaperRiskResponse)
-def get_paper_portfolio_risk(portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID)):
-    view = paper_trading_service.get_portfolio(portfolio_id)
+def get_paper_portfolio_risk(
+    portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    view = paper_trading_service.get_portfolio(db, user.id, portfolio_id)
     result = paper_risk.assess_portfolio_risk(view)
     return PaperRiskResponse(**result.__dict__)
 
 
 @router.get("/paper-portfolio/history", response_model=PaperEquityHistoryResponse)
-def get_paper_portfolio_history(portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID)):
-    view = paper_trading_service.get_equity_history(portfolio_id)
+def get_paper_portfolio_history(
+    portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    view = paper_trading_service.get_equity_history(db, user.id, portfolio_id)
     return PaperEquityHistoryResponse(
         portfolio_id=view.portfolio_id,
         starting_capital=view.starting_capital,
@@ -128,6 +161,10 @@ def get_paper_portfolio_history(portfolio_id: str = Query(default=PAPER_TRADING_
 
 
 @router.get("/paper-portfolio/forward-validation", response_model=ForwardValidationResponse)
-def get_forward_validation(portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID)):
-    view = forward_validation.get_forward_validation(portfolio_id)
+def get_forward_validation(
+    portfolio_id: str = Query(default=PAPER_TRADING_DEFAULT_PORTFOLIO_ID),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    view = forward_validation.get_forward_validation(db, user.id, portfolio_id)
     return ForwardValidationResponse(**view.__dict__)

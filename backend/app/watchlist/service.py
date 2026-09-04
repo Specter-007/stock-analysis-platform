@@ -9,6 +9,8 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
+from sqlalchemy.orm import Session
+
 from app.indicators.compute import compute_indicator_frame
 from app.market.regime import classify_market_regime
 from app.services import market_data
@@ -48,22 +50,22 @@ class WatchlistResult:
     entries: list[WatchlistEntry] = field(default_factory=list)
 
 
-def add_ticker(watchlist_id: str, ticker: str) -> list[str]:
+def add_ticker(db: Session, user_id: str, watchlist_id: str, ticker: str) -> list[str]:
     ticker = normalize_and_validate_ticker(ticker)
-    tickers = load_tickers(watchlist_id)
+    tickers = load_tickers(db, user_id, watchlist_id)
     if ticker in tickers:
         return tickers
     if len(tickers) >= MAX_WATCHLIST_SIZE:
         raise WatchlistError(f"Watchlist is at its maximum size ({MAX_WATCHLIST_SIZE} tickers).")
     tickers.append(ticker)
-    save_tickers(watchlist_id, tickers)
+    save_tickers(db, user_id, watchlist_id, tickers)
     return tickers
 
 
-def remove_ticker(watchlist_id: str, ticker: str) -> list[str]:
+def remove_ticker(db: Session, user_id: str, watchlist_id: str, ticker: str) -> list[str]:
     ticker = normalize_and_validate_ticker(ticker)
-    tickers = [t for t in load_tickers(watchlist_id) if t != ticker]
-    save_tickers(watchlist_id, tickers)
+    tickers = [t for t in load_tickers(db, user_id, watchlist_id) if t != ticker]
+    save_tickers(db, user_id, watchlist_id, tickers)
     return tickers
 
 
@@ -112,8 +114,8 @@ def _enrich(ticker: str, regime: str | None) -> WatchlistEntry:
         )
 
 
-def get_watchlist(watchlist_id: str = DEFAULT_WATCHLIST_ID) -> WatchlistResult:
-    tickers = load_tickers(watchlist_id)
+def get_watchlist(db: Session, user_id: str, watchlist_id: str = DEFAULT_WATCHLIST_ID) -> WatchlistResult:
+    tickers = load_tickers(db, user_id, watchlist_id)
     if not tickers:
         return WatchlistResult(watchlist_id=watchlist_id, tickers=[], entries=[])
 
