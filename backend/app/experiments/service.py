@@ -97,6 +97,24 @@ def delete_experiment(experiment_id: str) -> bool:
     return store.delete_experiment(experiment_id)
 
 
+def update_notes(experiment_id: str, notes: str | None = None, tags: list[str] | None = None) -> Experiment:
+    """Notes and tags are research metadata, not part of what makes an
+    experiment reproducible (the fingerprint explicitly excludes them) - so
+    editing them after the fact never changes the fingerprint or requires
+    re-running anything.
+    """
+    experiment = store.load_experiment(experiment_id)
+    if experiment is None:
+        raise ValueError(f"Experiment not found: {experiment_id}")
+    if notes is not None:
+        experiment.notes = notes
+    if tags is not None:
+        experiment.tags = list(tags)
+    experiment.updated_at = _now_iso()
+    store.save_experiment(experiment)
+    return experiment
+
+
 def archive_experiment(experiment_id: str, archived: bool = True) -> Experiment:
     experiment = store.load_experiment(experiment_id)
     if experiment is None:
@@ -174,6 +192,10 @@ def _backtest_summary(bt) -> dict:
         "sharpe_ratio": bt.sharpe_ratio,
         "trading_days": bt.trading_days,
         "warnings": bt.warnings,
+        "strategy_curve": [asdict(p) for p in bt.strategy_curve],
+        "buy_hold_curve": [asdict(p) for p in bt.buy_hold_curve],
+        "benchmark_curve": [asdict(p) for p in bt.benchmark_curve],
+        "drawdown_curve": [asdict(p) for p in bt.drawdown_curve],
         **bt.trade_stats,
         **bt.advanced_metrics,
     }
@@ -192,6 +214,10 @@ def _portfolio_backtest_summary(bt) -> dict:
         "warnings": bt.warnings,
         "excluded_tickers": bt.excluded_tickers,
         "risk_analytics": bt.risk_analytics,
+        "equity_curve": [asdict(p) for p in bt.equity_curve],
+        "equal_weight_buy_hold_curve": [asdict(p) for p in bt.equal_weight_buy_hold_curve],
+        "benchmark_curve": [asdict(p) for p in bt.benchmark_curve],
+        "drawdown_curve": [asdict(p) for p in bt.drawdown_curve],
         **bt.advanced_metrics,
     }
 

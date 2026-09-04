@@ -1,9 +1,19 @@
 import type {
   BacktestRequestPayload,
   BacktestResponse,
+  CompareExperimentsResponse,
   ComparisonRequestPayload,
   ComparisonResponse,
+  CostStressRequestPayload,
+  CostStressResponse,
+  CreateExperimentPayload,
+  DriftRequestPayload,
+  DriftResponse,
+  Experiment,
+  ExperimentListResponse,
+  ForwardVsHistoricalResponse,
   FundamentalsResponse,
+  PaperPortfolioListResponse,
   ModelComparisonRequestPayload,
   ModelComparisonResponse,
   ScorecardRequestPayload,
@@ -289,4 +299,111 @@ export function runBacktest(payload: BacktestRequestPayload, signal?: AbortSigna
     body: JSON.stringify(payload),
     signal,
   });
+}
+
+// -------------------------------------------------------------------- V5
+
+export function runCostStress(payload: CostStressRequestPayload, signal?: AbortSignal) {
+  return apiFetch<CostStressResponse>(`/api/backtest/cost-stress`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export function getModelDrift(payload: DriftRequestPayload, signal?: AbortSignal) {
+  return apiFetch<DriftResponse>(`/api/model/drift`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export function getPaperPortfolios(signal?: AbortSignal) {
+  return apiFetch<PaperPortfolioListResponse>(`/api/paper-portfolios`, { signal });
+}
+
+// ------------------------------------------------------ Experiment Lab (V5)
+
+export function createExperiment(payload: CreateExperimentPayload, signal?: AbortSignal) {
+  return apiFetch<Experiment>(`/api/experiments`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal,
+  });
+}
+
+export function listExperiments(includeArchived = false, signal?: AbortSignal) {
+  return apiFetch<ExperimentListResponse>(
+    `/api/experiments?include_archived=${includeArchived}`,
+    { signal }
+  );
+}
+
+export function getExperiment(id: string, signal?: AbortSignal) {
+  return apiFetch<Experiment>(`/api/experiments/${encodeURIComponent(id)}`, { signal });
+}
+
+export function deleteExperiment(id: string, signal?: AbortSignal) {
+  return apiFetch<{ deleted: boolean; id: string }>(`/api/experiments/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    signal,
+  });
+}
+
+export function runExperiment(id: string, signal?: AbortSignal) {
+  return apiFetch<Experiment>(`/api/experiments/${encodeURIComponent(id)}/run`, {
+    method: "POST",
+    signal,
+  });
+}
+
+export function updateExperimentNotes(id: string, notes?: string, tags?: string[], signal?: AbortSignal) {
+  return apiFetch<Experiment>(`/api/experiments/${encodeURIComponent(id)}/notes`, {
+    method: "PATCH",
+    body: JSON.stringify({ notes: notes ?? null, tags: tags ?? null }),
+    signal,
+  });
+}
+
+export function duplicateExperiment(id: string, newName?: string, signal?: AbortSignal) {
+  return apiFetch<Experiment>(`/api/experiments/${encodeURIComponent(id)}/duplicate`, {
+    method: "POST",
+    body: JSON.stringify({ new_name: newName ?? null }),
+    signal,
+  });
+}
+
+export function archiveExperiment(id: string, archived: boolean, signal?: AbortSignal) {
+  return apiFetch<Experiment>(`/api/experiments/${encodeURIComponent(id)}/archive`, {
+    method: "POST",
+    body: JSON.stringify({ archived }),
+    signal,
+  });
+}
+
+export function startForwardSimulation(id: string, signal?: AbortSignal) {
+  return apiFetch<Experiment>(`/api/experiments/${encodeURIComponent(id)}/forward-simulation`, {
+    method: "POST",
+    signal,
+  });
+}
+
+export function compareExperiments(experimentIds: string[], signal?: AbortSignal) {
+  return apiFetch<CompareExperimentsResponse>(`/api/experiments/compare`, {
+    method: "POST",
+    body: JSON.stringify({ experiment_ids: experimentIds }),
+    signal,
+  });
+}
+
+export function getForwardVsHistorical(id: string, signal?: AbortSignal) {
+  return apiFetch<ForwardVsHistoricalResponse>(
+    `/api/experiments/${encodeURIComponent(id)}/forward-vs-historical`,
+    { signal }
+  );
+}
+
+export function getExperimentExportUrl(id: string): string {
+  return `${API_BASE_URL}/api/experiments/${encodeURIComponent(id)}/export`;
 }

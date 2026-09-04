@@ -592,12 +592,23 @@ export interface MonteCarloResponse {
   ticker: string;
   simulations: number;
   resampling_basis: "trade_returns" | "daily_returns" | "unavailable";
+  resampling_method: "iid_bootstrap" | "block_bootstrap" | "unavailable";
   sample_size: number;
+  seed: number | null;
   median_return_percent: number | null;
   percentile_5_return_percent: number | null;
   percentile_95_return_percent: number | null;
   median_max_drawdown_percent: number | null;
   worst_max_drawdown_percent: number | null;
+  median_cagr_percent: number | null;
+  percentile_5_cagr_percent: number | null;
+  percentile_95_cagr_percent: number | null;
+  median_final_equity: number | null;
+  percentile_5_final_equity: number | null;
+  percentile_95_final_equity: number | null;
+  probability_of_loss_percent: number | null;
+  drawdown_threshold_percent: number;
+  probability_of_exceeding_drawdown_threshold_percent: number | null;
   methodology: string;
   meta: DataMeta;
 }
@@ -611,6 +622,207 @@ export interface MonteCarloRequestPayload {
   slippage_bps: number;
   simulations: number;
   seed?: number | null;
+  drawdown_threshold_percent?: number;
+}
+
+// -------------------------------------------------------------------- V5
+
+export interface CostStressScenario {
+  label: string;
+  commission_bps: number;
+  slippage_bps: number;
+  net_return_percent: number | null;
+  total_cost_percent: number | null;
+  cagr_percent: number | null;
+  sharpe_ratio: number | null;
+  sortino_ratio: number | null;
+  max_drawdown_percent: number | null;
+  turnover_percent: number | null;
+  number_of_trades: number;
+}
+
+export interface CostStressResponse {
+  ticker: string;
+  gross_return_percent: number | null;
+  commission_scenarios: CostStressScenario[];
+  slippage_scenarios: CostStressScenario[];
+  methodology: string;
+  meta: DataMeta;
+}
+
+export interface CostStressRequestPayload {
+  ticker: string;
+  start_date: string;
+  end_date: string;
+  initial_capital: number;
+  base_commission_bps: number;
+  base_slippage_bps: number;
+}
+
+export type DriftBucketLabel = string;
+
+export interface DistributionComparison {
+  dimension: string;
+  historical_percent: Record<DriftBucketLabel, number>;
+  recent_percent: Record<DriftBucketLabel, number>;
+  shifted_buckets: string[];
+  flagged: boolean;
+}
+
+export interface DriftResponse {
+  ticker: string;
+  model_version: string;
+  historical_sessions: number;
+  recent_sessions: number;
+  insufficient_data: boolean;
+  signal_distribution: DistributionComparison | null;
+  factor_distribution: DistributionComparison | null;
+  regime_distribution: DistributionComparison | null;
+  methodology: string;
+  meta: DataMeta;
+}
+
+export interface DriftRequestPayload {
+  ticker: string;
+  benchmark?: string;
+}
+
+// ------------------------------------------------------ Experiment Lab (V5)
+
+export type ExperimentStatus =
+  | "DRAFT" | "CONFIGURED" | "RUNNING" | "COMPLETED" | "VALIDATED" | "PAPER_FORWARD_TEST" | "FAILED";
+
+export interface PortfolioConstraintsInput {
+  max_position_weight_percent?: number;
+  min_position_weight_percent?: number;
+  max_holdings?: number | null;
+  cash_allocation_percent?: number;
+  sector_cap_percent?: number | null;
+}
+
+export interface ExperimentConfig {
+  model_version: string;
+  tickers: string[];
+  benchmark: string;
+  start_date: string;
+  end_date: string;
+  initial_capital: number;
+  commission_bps: number;
+  slippage_bps: number;
+  allocation_method: string | null;
+  rebalance_frequency: string | null;
+  portfolio_constraints: PortfolioConstraintsInput | null;
+  run_out_of_sample: boolean;
+  run_walk_forward: boolean;
+  run_sensitivity: boolean;
+  run_monte_carlo: boolean;
+  run_regime_analysis: boolean;
+  run_cost_stress: boolean;
+  monte_carlo_simulations: number;
+  monte_carlo_seed: number | null;
+  sensitivity_parameters: string[];
+  walk_forward_train_years: number;
+  walk_forward_test_years: number;
+  walk_forward_max_folds: number;
+}
+
+export interface CreateExperimentPayload {
+  name: string;
+  config: ExperimentConfig;
+  notes?: string;
+  tags?: string[];
+}
+
+export interface ValidationOutcome {
+  requested: boolean;
+  completed: boolean;
+  error: string | null;
+  result: Record<string, unknown> | null;
+}
+
+export interface ExperimentResults {
+  backtest: ValidationOutcome;
+  out_of_sample: ValidationOutcome;
+  walk_forward: ValidationOutcome;
+  sensitivity: ValidationOutcome;
+  monte_carlo: ValidationOutcome;
+  regime_performance: ValidationOutcome;
+  cost_stress: ValidationOutcome;
+}
+
+export interface DataProvenance {
+  data_source: string;
+  retrieved_at: string;
+  data_status: string;
+  tickers_retrieved: string[];
+  tickers_unavailable: Record<string, string>;
+  latest_market_timestamp: string | null;
+  timeframe: string;
+}
+
+export interface Experiment {
+  id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  status: ExperimentStatus;
+  config: ExperimentConfig;
+  fingerprint: string;
+  notes: string;
+  tags: string[];
+  results: ExperimentResults | null;
+  data_provenance: DataProvenance | null;
+  error: string | null;
+  forward_portfolio_id: string | null;
+  reproduced_from: string | null;
+  archived: boolean;
+}
+
+export interface ExperimentListRow {
+  experiment: Experiment;
+  group_count: number;
+  data_mining_warning: boolean;
+}
+
+export interface ExperimentListResponse {
+  experiments: ExperimentListRow[];
+  methodology: string;
+}
+
+export interface CompareExperimentsResponse {
+  experiments: Experiment[];
+  warnings: string[];
+}
+
+export interface ForwardVsHistoricalMetrics {
+  return_percent: number | null;
+  sharpe_ratio: number | null;
+  max_drawdown_percent: number | null;
+  trading_days_observed: number | null;
+}
+
+export interface ForwardVsHistoricalResponse {
+  available: boolean;
+  reason: string | null;
+  historical: ForwardVsHistoricalMetrics | null;
+  historical_source: string | null;
+  forward: ForwardVsHistoricalMetrics | null;
+  forward_sample_developing: boolean;
+  deviation_notes: string[];
+}
+
+export interface PaperPortfolioSummary {
+  portfolio_id: string;
+  starting_capital: number;
+  current_value: number;
+  total_return_percent: number;
+  number_of_positions: number;
+  number_of_trades: number;
+  cash_percent: number;
+}
+
+export interface PaperPortfolioListResponse {
+  portfolios: PaperPortfolioSummary[];
 }
 
 export interface SignalHistoryPoint {

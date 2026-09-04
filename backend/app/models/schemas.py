@@ -1370,6 +1370,11 @@ class ArchiveExperimentRequest(BaseModel):
     archived: bool = True
 
 
+class UpdateExperimentNotesRequest(BaseModel):
+    notes: str | None = Field(default=None, max_length=5000)
+    tags: list[str] | None = Field(default=None, max_length=20)
+
+
 class CompareExperimentsRequest(BaseModel):
     experiment_ids: list[str] = Field(min_length=EXPERIMENT_COMPARE_MIN, max_length=EXPERIMENT_COMPARE_MAX)
 

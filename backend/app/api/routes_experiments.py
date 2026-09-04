@@ -23,6 +23,7 @@ from app.models.schemas import (
     ExperimentResultsModel,
     ForwardVsHistoricalMetrics,
     ForwardVsHistoricalResponse,
+    UpdateExperimentNotesRequest,
     ValidationOutcomeModel,
 )
 from app.services import market_data
@@ -181,6 +182,13 @@ def _safe_fetch(ticker: str):
         return df, None
     except Exception as exc:
         return None, str(exc)
+
+
+@router.patch("/{experiment_id}/notes", response_model=ExperimentResponse)
+def update_experiment_notes(experiment_id: str, request: UpdateExperimentNotesRequest):
+    _get_or_404(experiment_id)
+    updated = service.update_notes(experiment_id, notes=request.notes, tags=request.tags)
+    return _experiment_to_response(updated)
 
 
 @router.post("/{experiment_id}/duplicate", response_model=ExperimentResponse)

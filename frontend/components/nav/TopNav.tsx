@@ -15,6 +15,8 @@ const NAV_LINKS = [
   { href: "/backtest", label: "Backtesting" },
   { href: "/portfolio", label: "Portfolio" },
   { href: "/compare", label: "Compare" },
+  { href: "/experiments", label: "Experiment Lab" },
+  { href: "/research", label: "Research History" },
   { href: "/paper-trading", label: "Paper Trading" },
   { href: "/model", label: "Model" },
 ];

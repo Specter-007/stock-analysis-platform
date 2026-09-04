@@ -152,6 +152,31 @@ def test_run_experiment_backtest_only_reaches_validated(ohlcv_long):
     assert ran.results.backtest.result["total_return_percent"] is not None
 
 
+def test_backtest_result_includes_equity_curves_for_charting(ohlcv_long):
+    start, end = _date_range(ohlcv_long)
+    exp = service.create_experiment(_config(start_date=start, end_date=end), name="Curve check")
+    ran = service.run_experiment(exp.id, price_data=_price_data(ohlcv_long), benchmark_df=ohlcv_long, tickers_unavailable={})
+    result = ran.results.backtest.result
+    assert len(result["strategy_curve"]) > 0
+    assert set(result["strategy_curve"][0].keys()) == {"date", "equity"}
+    assert len(result["drawdown_curve"]) == len(result["strategy_curve"])
+
+
+def test_portfolio_backtest_result_includes_equity_curves(ohlcv_long, ohlcv_uptrend, monkeypatch):
+    from app.backtesting import portfolio as portfolio_module
+    monkeypatch.setattr(portfolio_module, "_sector_for", lambda t: "Technology")
+
+    start = ohlcv_long.index[220].date().isoformat()
+    end = ohlcv_long.index[-1].date().isoformat()
+    exp = service.create_experiment(_config(tickers=["AAA", "BBB"], start_date=start, end_date=end), name="Portfolio curve check")
+    ran = service.run_experiment(
+        exp.id, price_data={"AAA": ohlcv_long, "BBB": ohlcv_uptrend}, benchmark_df=ohlcv_long, tickers_unavailable={},
+    )
+    result = ran.results.backtest.result
+    assert len(result["equity_curve"]) > 0
+    assert len(result["equal_weight_buy_hold_curve"]) > 0
+
+
 def test_run_experiment_with_all_validations_requested(ohlcv_long):
     start, end = _date_range(ohlcv_long, start_offset=0)
     exp = service.create_experiment(
@@ -280,6 +305,21 @@ def test_duplicate_experiment_has_same_fingerprint_new_id(ohlcv_long):
 def test_duplicate_of_nonexistent_experiment_raises():
     with pytest.raises(ValueError):
         service.duplicate_experiment("exp_missing")
+
+
+# -------------------------------------------------------------- Notes/tags
+
+def test_update_notes_does_not_change_fingerprint(ohlcv_long):
+    exp = service.create_experiment(_config(), name="Notes test", notes="original")
+    updated = service.update_notes(exp.id, notes="revised hypothesis", tags=["momentum"])
+    assert updated.notes == "revised hypothesis"
+    assert updated.tags == ["momentum"]
+    assert updated.fingerprint == exp.fingerprint
+
+
+def test_update_notes_nonexistent_raises():
+    with pytest.raises(ValueError):
+        service.update_notes("exp_missing", notes="x")
 
 
 # --------------------------------------------------------------- Archiving
