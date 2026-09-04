@@ -21,9 +21,12 @@ venv/
 *.egg
 
 # ---- Environment / secrets ----
-.env
-.env.local
-.env.*.local
+# Broad rule first: ignore every .env* variant (.env, .env.local,
+# .env.production, .env.production.local, .env.development, .env.test,
+# etc. - present or future) so a new Next.js/tooling convention can never
+# slip through un-ignored, then explicitly re-allow only the checked-in
+# placeholder-only example files.
+.env*
 !.env.example
 
 # ---- Editors / OS ----
@@ -51,9 +54,4 @@ backend/data/experiments/
 backend/data/*.db
 backend/data/*.db-journal
 backend/data/backups/
-
-# Environment secrets - never commit real values, only .env.example.
-.env
-backend/.env
-frontend/.env*.local
 
