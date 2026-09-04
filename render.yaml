@@ -1,0 +1,63 @@
+# Render Blueprint for the FastAPI backend (see docs/DEPLOYMENT.md).
+#
+# This deploys ONLY the backend - the frontend is deployed separately to
+# Vercel (see frontend/.env.example and docs/DEPLOYMENT.md for how the two
+# are wired together via NEXT_PUBLIC_API_BASE_URL / CORS_ALLOWED_ORIGINS).
+#
+# Values marked `sync: false` are real secrets or environment-specific
+# values this repo deliberately does not know - Render will prompt for
+# them once when the Blueprint is first created, and never stores a
+# default here. Nothing below is a placeholder secret; entries that need
+# a real value simply have none until you supply it in the Render
+# dashboard.
+services:
+  - type: web
+    name: stock-analyst-backend
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: APP_ENV
+        value: production
+      # Must be a real, private, random value - the app refuses to start
+      # under APP_ENV=production with the insecure dev default (see
+      # app/settings.py). Generate one with, e.g.:
+      #   python -c "import secrets; print(secrets.token_urlsafe(48))"
+      - key: SESSION_SECRET
+        sync: false
+      # The deployed Vercel frontend's exact origin(s), comma-separated,
+      # no trailing slash, never "*" (app/settings.py refuses to start
+      # under APP_ENV=production if this is empty or contains "*", since
+      # this app uses credentialed/cookie-based CORS).
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://stock-analysis-platform-gamma.vercel.app
+      - key: FRONTEND_URL
+        value: https://stock-analysis-platform-gamma.vercel.app
+      # Not set here on purpose: without a real managed PostgreSQL
+      # DATABASE_URL, the app falls back to a local SQLite file INSIDE
+      # this container - which is fine for the stateless, public stock
+      # analysis endpoints (they never touch the database), but is NOT a
+      # real production database, does not persist across deploys/restarts,
+      # and must not be relied on for accounts/watchlists/portfolios/
+      # experiments/settings until a real DATABASE_URL is provided here
+      # (see docs/DATABASE.md for the recommended Neon setup). Left as
+      # `sync: false` with no value so the requirement stays visible
+      # rather than silently defaulting.
+      - key: DATABASE_URL
+        sync: false
+      # Unset (console mode): verification/reset emails are logged, not
+      # sent. Set to "smtp" plus SMTP_HOST/SMTP_PORT/SMTP_USERNAME/
+      # SMTP_PASSWORD once a real provider (e.g. Resend) is configured.
+      - key: EMAIL_PROVIDER
+        value: console
+      # Optional - only needed once more than one backend instance/process
+      # is running (see docs/SECURITY.md#rate-limiting). Leave unset for a
+      # single free-tier instance.
+      - key: RATE_LIMIT_STORAGE_URL
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO

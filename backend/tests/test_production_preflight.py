@@ -43,8 +43,25 @@ def test_preflight_fails_fast_on_missing_production_secret(monkeypatch, capsys):
     monkeypatch.delenv("CORS_ALLOWED_ORIGINS", raising=False)
     preflight = _reload_settings_and_preflight()
     assert preflight.main() == 1
+
+
+def test_preflight_fails_on_missing_database_url_in_production(monkeypatch, capsys):
+    """Documents a real, deliberate deployment decision (see render.yaml):
+    the backend can and does boot under APP_ENV=production with no
+    DATABASE_URL at all - the public stock-analysis endpoints never touch
+    the database - but preflight must still call this out as a FAIL, not
+    silently accept a SQLite fallback as production-ready. This is an
+    accepted, documented gap for that specific interim deployment, not a
+    hidden one."""
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("SESSION_SECRET", "a-real-secret")
+    monkeypatch.setenv("CORS_ALLOWED_ORIGINS", "https://stock-analysis-platform-gamma.vercel.app")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    preflight = _reload_settings_and_preflight()
+    exit_code = preflight.main()
     out = capsys.readouterr().out
-    assert "[FAIL]" in out
+    assert "[FAIL] DATABASE_URL" in out
+    assert exit_code == 1
 
 
 def test_preflight_never_prints_the_actual_secret_value(monkeypatch, capsys):

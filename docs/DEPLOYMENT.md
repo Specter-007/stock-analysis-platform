@@ -1,10 +1,89 @@
 # Deployment
 
-**This documents how to deploy the application. It has not actually been
-deployed anywhere by this codebase's own actions** - no infrastructure was
-provisioned, no domain configured, no PostgreSQL server stood up. Treat
-everything below as instructions to follow, not a description of a live
-system.
+**This documents how to deploy the application.** Parts of it now describe
+a real, live deployment; other parts are still instructions to follow, not
+infrastructure that exists yet. The status line at the top of each
+relevant section says which.
+
+## Current deployment status
+
+- **Frontend**: deployed to Vercel - **https://stock-analysis-platform-gamma.vercel.app**
+- **Backend**: not yet deployed. `render.yaml` (repo root) and
+  `backend/.python-version` are prepared and ready for a Render Blueprint
+  deployment - see "Deploying the backend to Render" below for the exact
+  steps and the current interim limitation (no database yet).
+- **PostgreSQL / Redis / SMTP**: not yet provisioned. The backend, once
+  deployed, will serve the public/stateless stock-analysis endpoints
+  correctly without any of these - see the interim-limitation note below.
+  Handled in a later phase.
+- **Domain/DNS**: using the platforms' own generated URLs
+  (`*.vercel.app` / `*.onrender.com`), no custom domain configured.
+
+## Deploying the backend to Render
+
+The repository root has a `render.yaml` Blueprint that defines the
+backend as a free-tier Python web service (`rootDir: backend`, `pip
+install -r requirements.txt`, `uvicorn app.main:app --host 0.0.0.0 --port
+$PORT`, health check at `/api/health`). To deploy it:
+
+1. In the Render dashboard: **New +** → **Blueprint** → connect the
+   `Specter-007/stock-analysis-platform` GitHub repo → Render reads
+   `render.yaml` and proposes the `stock-analyst-backend` service.
+2. You will be prompted for the `sync: false` values `render.yaml`
+   deliberately leaves blank (Render does not read secrets out of a repo
+   file, and this one was written to never contain any):
+   - `SESSION_SECRET` - generate a real one, e.g.
+     `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+     Never reuse a value that has appeared anywhere in this repo or its
+     history (none has - this generates a fresh one).
+   - `DATABASE_URL` - **leave this blank for now**. See the limitation
+     note immediately below for exactly what that means and doesn't mean.
+   - `RATE_LIMIT_STORAGE_URL` - leave blank; not needed for a single
+     instance.
+3. `CORS_ALLOWED_ORIGINS` and `FRONTEND_URL` are already set in
+   `render.yaml` to the real deployed Vercel URL above - update both if
+   that URL ever changes (e.g. a custom domain is added later).
+4. Deploy. Once Render assigns the service a URL
+   (`https://stock-analyst-backend-XXXX.onrender.com` or similar), record
+   it - the frontend needs it next (see "Frontend API URL" below).
+
+**Interim limitation, stated plainly:** deploying with no `DATABASE_URL`
+means this backend instance has no real database - it falls back to a
+SQLite file *inside the Render container*, which is wiped on every
+restart/redeploy. This is deliberately acceptable **only** because the
+public stock-analysis endpoints (`/api/stock/*`, `/api/backtest/*`,
+`/api/model`, `/api/compare`, etc. - see `app/api/routes_stock.py` and
+siblings) never touch the database at all. **Do not use this deployment's
+registration, login, watchlist, paper-trading, experiments, or settings
+features** until a real `DATABASE_URL` (see [DATABASE.md](DATABASE.md)'s
+Neon recommendation) is set and `alembic upgrade head` has been run
+against it - anything saved before that point is not real, persistent
+data. Running `python scripts/production_preflight.py` against this
+configuration correctly reports `[FAIL] DATABASE_URL` - that is the
+script working as intended, not a bug to silence.
+
+## Frontend API URL (connecting Vercel to Render)
+
+The frontend reads its backend URL from exactly one place:
+`NEXT_PUBLIC_API_BASE_URL` (`frontend/lib/api.ts`), defaulting to
+`http://localhost:8000` when unset. This default is why the deployed
+Vercel frontend currently shows "Could not reach the analysis server" -
+the *browser visiting the Vercel site* tries to call `localhost:8000`,
+meaning the visitor's own machine, not any real server.
+
+Once the Render backend is deployed and its URL is known:
+
+1. In the Vercel dashboard for this project: **Settings** → **Environment
+   Variables** → add `NEXT_PUBLIC_API_BASE_URL` = the real Render URL
+   (e.g. `https://stock-analyst-backend-XXXX.onrender.com`), scoped to
+   Production (and Preview, if desired).
+2. **Trigger a new deployment** - Next.js bakes `NEXT_PUBLIC_*` variables
+   into the build at build time, not read at request time, so an existing
+   deployment will not pick up the change until it's rebuilt (**Deployments**
+   → **⋯** → **Redeploy**, or push a new commit).
+3. Local development is unaffected - `frontend/.env.local` (gitignored)
+   keeps pointing at `http://localhost:8000`, so `npm run dev` continues
+   to work against a locally-running backend exactly as before.
 
 ## Recommended architecture
 
@@ -131,6 +210,18 @@ pre-existing `.env.local` pointed the frontend at the backend's LAN IP
 while the browser had the page open via `localhost`, which silently
 dropped every cookie) - see [DEVELOPMENT.md](DEVELOPMENT.md). Plan your
 production domain names with this constraint in mind.
+
+**This applies directly to the current Vercel + Render deployment**:
+`stock-analysis-platform-gamma.vercel.app` and `*.onrender.com` are
+different registrable domains, so this is a genuinely cross-site pairing.
+The public stock-analysis endpoints don't need cookies at all, so this
+does not block them - but registration/login/session cookies **will not
+work** between these two specific hosts as configured. Fixing that
+properly (a shared registrable domain via custom DNS, e.g.
+`app.yourdomain.com` + `api.yourdomain.com`) is a real architecture
+decision for whenever authentication is brought online here, not
+something to work around by loosening `SameSite` or CSRF - that would be
+weakening a security control to paper over a domain-naming choice.
 
 ## Reverse proxy / HTTPS
 
