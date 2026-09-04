@@ -86,10 +86,12 @@ python scripts/production_preflight.py
 ```
 
 It validates `APP_ENV`, `SESSION_SECRET`, `CORS_ALLOWED_ORIGINS`, `DATABASE_URL` (including actually
-connecting to it), `EMAIL_PROVIDER`/SMTP completeness, and `SESSION_COOKIE_SECURE` - printing
-`[PASS]`/`[WARN]`/`[FAIL]` lines and exiting non-zero on a fundamentally broken configuration. It
-never prints a secret's actual value. This is a manual step - it is not run automatically by the
-application itself.
+connecting to it and checking that `alembic upgrade head` has actually been run against it - a
+reachable-but-unmigrated database is a `[FAIL]`, not a `[PASS]`), `EMAIL_PROVIDER`/SMTP completeness,
+`RATE_LIMIT_STORAGE_URL` reachability (a `[WARN]` if unreachable, never a `[FAIL]` - the app already
+falls back to per-process limiting), and `SESSION_COOKIE_SECURE` - printing `[PASS]`/`[WARN]`/`[FAIL]`
+lines and exiting non-zero on a fundamentally broken configuration. It never prints a secret's actual
+value. This is a manual step - it is not run automatically by the application itself.
 
 ## Database migration on deploy
 
