@@ -435,18 +435,30 @@ class MonteCarloRequest(BaseModel):
     slippage_bps: float = Field(default=DEFAULT_SLIPPAGE_BPS, ge=0, le=1000)
     simulations: int = Field(default=1000, ge=100, le=5000)
     seed: int | None = None
+    drawdown_threshold_percent: float = Field(default=-20.0, le=0, ge=-100)
 
 
 class MonteCarloResponse(BaseModel):
     ticker: str
     simulations: int
     resampling_basis: str
+    resampling_method: str
     sample_size: int
+    seed: int | None
     median_return_percent: float | None
     percentile_5_return_percent: float | None
     percentile_95_return_percent: float | None
     median_max_drawdown_percent: float | None
     worst_max_drawdown_percent: float | None
+    median_cagr_percent: float | None
+    percentile_5_cagr_percent: float | None
+    percentile_95_cagr_percent: float | None
+    median_final_equity: float | None
+    percentile_5_final_equity: float | None
+    percentile_95_final_equity: float | None
+    probability_of_loss_percent: float | None
+    drawdown_threshold_percent: float
+    probability_of_exceeding_drawdown_threshold_percent: float | None
     methodology: str
     meta: DataMeta
 
@@ -531,6 +543,56 @@ class PortfolioBacktestResponse(BaseModel):
     warnings: list[str]
     excluded_tickers: dict[str, str]
     methodology: dict[str, str]
+    meta: DataMeta
+
+
+# -------------------------------------------------------- Cost Stress (V5)
+
+class CostStressRequest(BaseModel):
+    ticker: str
+    start_date: dt.date
+    end_date: dt.date
+    initial_capital: float = Field(default=DEFAULT_INITIAL_CAPITAL, gt=0)
+    base_commission_bps: float = Field(default=DEFAULT_TRANSACTION_COST_BPS, ge=0, le=1000)
+    base_slippage_bps: float = Field(default=DEFAULT_SLIPPAGE_BPS, ge=0, le=1000)
+    model_version: str = Field(default=MODEL_VERSION_CURRENT)
+
+    @field_validator("model_version")
+    @classmethod
+    def valid_model_version_cost_stress(cls, v: str) -> str:
+        if v not in SUPPORTED_MODEL_VERSIONS:
+            return MODEL_VERSION_CURRENT
+        return v
+
+    @field_validator("end_date")
+    @classmethod
+    def end_after_start_cost_stress(cls, v: dt.date, info):
+        start = info.data.get("start_date")
+        if start is not None and v <= start:
+            raise ValueError("end_date must be after start_date.")
+        return v
+
+
+class CostStressScenarioModel(BaseModel):
+    label: str
+    commission_bps: float
+    slippage_bps: float
+    net_return_percent: float | None
+    total_cost_percent: float | None
+    cagr_percent: float | None
+    sharpe_ratio: float | None
+    sortino_ratio: float | None
+    max_drawdown_percent: float | None
+    turnover_percent: float | None
+    number_of_trades: int
+
+
+class CostStressResponse(BaseModel):
+    ticker: str
+    gross_return_percent: float | None
+    commission_scenarios: list[CostStressScenarioModel]
+    slippage_scenarios: list[CostStressScenarioModel]
+    methodology: str
     meta: DataMeta
 
 

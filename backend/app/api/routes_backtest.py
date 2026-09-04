@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 
+from app.backtesting.cost_stress import run_cost_stress_test
 from app.backtesting.engine import BacktestResult, run_backtest
 from app.backtesting.monte_carlo import run_monte_carlo
 from app.backtesting.out_of_sample import run_out_of_sample_validation
@@ -24,6 +25,9 @@ from app.backtesting.walk_forward import run_walk_forward
 from app.models.schemas import (
     BacktestRequest,
     BacktestResponse,
+    CostStressRequest,
+    CostStressResponse,
+    CostStressScenarioModel,
     MonteCarloRequest,
     MonteCarloResponse,
     OutOfSampleRequest,
@@ -200,19 +204,58 @@ def post_monte_carlo(request: MonteCarloRequest):
         initial_capital=request.initial_capital,
         num_simulations=request.simulations,
         seed=request.seed,
+        drawdown_threshold_percent=request.drawdown_threshold_percent,
+        trading_days_in_period=backtest_result.trading_days,
     )
 
     return MonteCarloResponse(
         ticker=ticker,
         simulations=mc_result.simulations,
         resampling_basis=mc_result.resampling_basis,
+        resampling_method=mc_result.resampling_method,
         sample_size=mc_result.sample_size,
+        seed=mc_result.seed,
         median_return_percent=mc_result.median_return_percent,
         percentile_5_return_percent=mc_result.percentile_5_return_percent,
         percentile_95_return_percent=mc_result.percentile_95_return_percent,
         median_max_drawdown_percent=mc_result.median_max_drawdown_percent,
         worst_max_drawdown_percent=mc_result.worst_max_drawdown_percent,
+        median_cagr_percent=mc_result.median_cagr_percent,
+        percentile_5_cagr_percent=mc_result.percentile_5_cagr_percent,
+        percentile_95_cagr_percent=mc_result.percentile_95_cagr_percent,
+        median_final_equity=mc_result.median_final_equity,
+        percentile_5_final_equity=mc_result.percentile_5_final_equity,
+        percentile_95_final_equity=mc_result.percentile_95_final_equity,
+        probability_of_loss_percent=mc_result.probability_of_loss_percent,
+        drawdown_threshold_percent=mc_result.drawdown_threshold_percent,
+        probability_of_exceeding_drawdown_threshold_percent=mc_result.probability_of_exceeding_drawdown_threshold_percent,
         methodology=mc_result.methodology,
+        meta=meta.to_dict(),
+    )
+
+
+@router.post("/backtest/cost-stress", response_model=CostStressResponse)
+def post_cost_stress(request: CostStressRequest):
+    ticker = normalize_and_validate_ticker(request.ticker)
+    full_df, meta = market_data.get_full_daily_history(ticker)
+
+    result = run_cost_stress_test(
+        ticker=ticker,
+        full_price_df=full_df,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        initial_capital=request.initial_capital,
+        base_commission_bps=request.base_commission_bps,
+        base_slippage_bps=request.base_slippage_bps,
+        model_version=request.model_version,
+    )
+
+    return CostStressResponse(
+        ticker=result.ticker,
+        gross_return_percent=result.gross_return_percent,
+        commission_scenarios=[CostStressScenarioModel(**s.__dict__) for s in result.commission_scenarios],
+        slippage_scenarios=[CostStressScenarioModel(**s.__dict__) for s in result.slippage_scenarios],
+        methodology=result.methodology,
         meta=meta.to_dict(),
     )
 

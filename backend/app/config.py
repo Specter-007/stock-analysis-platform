@@ -185,3 +185,45 @@ PAPER_TRADING_DEFAULT_MAX_POSITION_PERCENT = 20.0
 # --- Signal performance analytics ---
 SIGNAL_PERFORMANCE_HORIZONS_SESSIONS = (5, 20)
 SIGNAL_PERFORMANCE_LOOKBACK_SESSIONS = 500
+
+# --- V5: Experiment Lab ---
+EXPERIMENTS_DATA_DIR = "data/experiments"
+EXPERIMENT_ID_PREFIX = "exp"
+# Bounds a single research-history listing/comparison call so a caller can't
+# force the server to load an unbounded number of experiment files at once.
+EXPERIMENT_LIST_MAX_LIMIT = 200
+EXPERIMENT_COMPARE_MIN = 2
+EXPERIMENT_COMPARE_MAX = 5
+# Flags a (universe, period) group in research history once this many
+# experiments have been run against it - a transparent, documented signal
+# that repeated searching over the same historical data raises overfitting/
+# data-mining risk, never a statistical correction applied automatically.
+EXPERIMENT_DATA_MINING_WARNING_THRESHOLD = 10
+
+# --- V5: Cost stress testing ---
+# Multiplies the caller's own base commission (holding slippage at base) to
+# see whether the strategy survives materially higher trading frictions.
+COST_STRESS_COMMISSION_MULTIPLIERS = {"BASE": 1.0, "MODERATE": 2.0, "HIGH": 5.0, "EXTREME": 10.0}
+# Absolute slippage levels (bps) tested independently, holding commission at
+# base - kept as a separate sweep because commission and slippage are
+# economically different frictions (a fixed fee vs. market-impact/price
+# movement) and conflating them would obscure which one actually matters.
+COST_STRESS_SLIPPAGE_LEVELS_BPS = (0.0, 5.0, 10.0, 25.0, 50.0)
+
+# --- V5: Monte Carlo extensions ---
+# Below this length, resampling individual (rather than contiguous block)
+# daily returns is used - see app.backtesting.monte_carlo for why blocks are
+# preferred above this length (autocorrelation in a long/flat strategy's
+# day-to-day returns from persistent positions).
+MONTE_CARLO_BLOCK_BOOTSTRAP_BLOCK_SIZE = 5
+MONTE_CARLO_DEFAULT_DRAWDOWN_THRESHOLD_PERCENT = -20.0
+
+# --- V5: Model drift monitoring ---
+# Threshold-based heuristic (documented as such, not a formal hypothesis
+# test - daily signals are highly autocorrelated, so a classical test's IID
+# assumption would not hold): a signal/regime bucket's share must move by at
+# least this many percentage points between the historical and recent
+# windows to be flagged.
+DRIFT_SIGNIFICANT_SHIFT_PP = 15.0
+DRIFT_RECENT_WINDOW_SESSIONS = 60
+DRIFT_MIN_SESSIONS_FOR_COMPARISON = 30
