@@ -293,10 +293,14 @@ behavior - see [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md),
   returns an identical 404, so an attacker can't distinguish "not yours" from "doesn't exist." See
   `backend/tests/test_idor.py` (10 tests, two independently-authenticated clients sharing one
   database) for the actual proof.
-- **Settings, onboarding, notifications:** `/settings/{account,security,preferences,notifications}`;
-  a skippable first-login onboarding flow; a notification bell fed only by real backend events
-  (an experiment completing/failing, a paper-trading stop-loss/take-profit/trailing-stop trigger) -
-  verified live in a real browser, never a fabricated notification.
+- **Settings, onboarding, notifications, data export:**
+  `/settings/{account,security,preferences,notifications,privacy}`; a skippable first-login
+  onboarding flow; a notification bell fed only by real backend events (an experiment completing/
+  failing, a paper-trading stop-loss/take-profit/trailing-stop trigger) - verified live in a real
+  browser, never a fabricated notification; `GET /api/settings/export` downloads a structured JSON
+  export of everything the caller owns (profile, preferences, watchlists, paper portfolios,
+  experiments, notifications, support requests), excluding the password hash and all session/CSRF/
+  reset-token secrets.
 - **Command palette** (Ctrl/Cmd+K): page navigation plus live ticker search.
 - **Legal & docs:** real Privacy Policy, Terms of Service, Cookie Policy, and Financial Disclaimer
   (each flagged as not yet reviewed by a lawyer), a `/docs` methodology page, and a `/contact` form
@@ -1028,7 +1032,9 @@ cd backend
 venv\Scripts\python -m pytest -q
 ```
 
-**522 tests** in `backend/tests/` (481 unit/component + 41 real-network integration) cover: ticker
+**567 tests** in `backend/tests/` (510 unit/component + 41 real-network integration + 16 tests against
+a real, disposable PostgreSQL server - see [Production SaaS Foundation](#production-saas-foundation)
+and [docs/DATABASE.md](docs/DATABASE.md)) cover: ticker
 validation, every indicator calculation (SMA, EMA,
 RSI, MACD, Bollinger Bands, ATR, ROC, historical volatility, relative volume) plus the interpretation
 layer that turns them into UI text (regression-tested after a real bug where the Bollinger lower-band
@@ -1238,25 +1244,35 @@ Documented honestly rather than silently omitted:
 
 **Production SaaS Foundation limitations** (see the linked docs for full detail):
 
-- **PostgreSQL itself has not been verified in this development environment** - no PostgreSQL
-  server is installed here. Every model and migration is dialect-portable and has been verified
-  against SQLite; before production use, point `DATABASE_URL` at a real PostgreSQL instance and
-  re-run `alembic upgrade head` plus the test suite against it. See
-  [docs/DATABASE.md](docs/DATABASE.md).
+- **Real PostgreSQL has now been verified** (updated during the final production-hardening pass) -
+  no PostgreSQL server is installed in this environment and Docker is unavailable, so this used
+  `pgserver` (a pip-installable disposable real PostgreSQL 16.2 binary; dev/test-only, see
+  `backend/requirements-dev.txt`) to genuinely test schema creation, JSONB columns, FK cascades,
+  unique constraints, transactions, the naive-UTC timestamp convention, multi-user isolation through
+  the real service layer, and two concurrency scenarios - 16 passing tests
+  (`backend/tests/test_postgresql_real.py`). **Still not verified**: a real managed provider (RDS,
+  Cloud SQL, Supabase, etc.) or a Docker-based Postgres, which may differ from this embedded build.
+  See [docs/DATABASE.md](docs/DATABASE.md).
 - **Rate limiting is per-process** (`slowapi`'s in-memory store) - correct for a single instance,
   not yet suitable for a horizontally-scaled multi-instance deployment without adding a shared
   store. See [docs/SECURITY.md](docs/SECURITY.md#rate-limiting).
+- **A narrow paper-trading concurrency race is documented, not fixed**: two genuinely simultaneous
+  requests for the *same* portfolio on the *same* day (e.g. one user with two open tabs) could in
+  principle both record a snapshot for that day, since snapshots live in a JSON array inside one row
+  rather than a separate table with its own uniqueness constraint. Low severity (a user can only race
+  themselves), and fixing it correctly would require a schema change beyond this hardening pass's
+  scope - see [docs/SECURITY.md](docs/SECURITY.md#real-postgresql-concurrency-findings).
 - **No automated backup system is configured.** [docs/DATABASE.md](docs/DATABASE.md) documents the
   `pg_dump`/`pg_restore` mechanics; nothing runs them on a schedule.
 - **Legal pages are accurate but not lawyer-reviewed.** Each explicitly says so and should not be
   treated as a compliance certification for GDPR, KVKK, or any other specific regime.
 - **The command palette's search covers page navigation and live ticker lookup only** - there is no
   full-text search across a user's own experiment/watchlist names yet.
-- **User data export is not implemented** - the architecture (one owner per row, everything
-  queryable by `user_id`) supports adding it, but no `GET /api/settings/export` endpoint exists yet.
 - **No third-party security audit or penetration test has been performed.** The IDOR/CSRF/CORS/
   rate-limiting/session-security tests in this repo are real and passing, but that is not a
-  substitute for independent review before a genuine production launch with real user data.
+  substitute for independent review before a genuine production launch with real user data. An
+  automated `pip-audit` dependency scan found one finding (pytest 8.3.4, a test-only dependency never
+  shipped to production) - see [docs/SECURITY.md](docs/SECURITY.md#dependency-audit).
 - **Email delivery requires configuring a real SMTP provider** (`EMAIL_PROVIDER=smtp`) - by default
   (`EMAIL_PROVIDER=console`) verification/reset/contact-confirmation emails are logged, not sent,
   and every response that would mention email honestly reflects that.

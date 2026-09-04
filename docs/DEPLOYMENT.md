@@ -53,6 +53,21 @@ NEXT_PUBLIC_API_BASE_URL=https://api.yourdomain.com npm run start
 `NEXT_PUBLIC_API_BASE_URL` is baked in at build time for a production
 Next.js build - set it correctly *before* `npm run build`, not after.
 
+## Preflight check
+
+Before starting the backend in a real deployment, run:
+
+```bash
+cd backend
+python scripts/production_preflight.py
+```
+
+It validates `APP_ENV`, `SESSION_SECRET`, `CORS_ALLOWED_ORIGINS`, `DATABASE_URL` (including actually
+connecting to it), `EMAIL_PROVIDER`/SMTP completeness, and `SESSION_COOKIE_SECURE` - printing
+`[PASS]`/`[WARN]`/`[FAIL]` lines and exiting non-zero on a fundamentally broken configuration. It
+never prints a secret's actual value. This is a manual step - it is not run automatically by the
+application itself.
+
 ## Database migration on deploy
 
 Run `alembic upgrade head` as a release step, before the new backend code
