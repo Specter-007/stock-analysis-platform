@@ -1,13 +1,15 @@
 import logging
-from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.api.errors import register_exception_handlers
+from app.api.routes_admin import router as admin_router
 from app.api.routes_auth import router as auth_router
 from app.api.routes_backtest import router as backtest_router
 from app.api.routes_comparison import router as comparison_router
@@ -20,7 +22,8 @@ from app.api.routes_settings import router as settings_router
 from app.api.routes_stock import router as stock_router
 from app.api.routes_support import router as support_router
 from app.api.routes_watchlist import router as watchlist_router
-from app.config import EXPERIMENTS_DATA_DIR, MODEL_VERSION_CURRENT, PAPER_TRADING_DATA_DIR
+from app.config import MODEL_VERSION_CURRENT
+from app.db.base import get_db
 from app.rate_limit import limiter
 from app.security_headers import SecurityHeadersMiddleware
 from app.settings import CORS_ALLOWED_ORIGINS
@@ -69,35 +72,39 @@ app.include_router(experiments_router)
 app.include_router(notifications_router)
 app.include_router(settings_router)
 app.include_router(support_router)
+app.include_router(admin_router)
 
 
 @app.get("/api/health", tags=["meta"])
 def health_check():
-    """Deliberately cheap: checks that each JSON data directory is
-    writable (a real, near-instant filesystem check), never a live Yahoo
-    Finance call - a health check that depends on an external network
-    call would make an unrelated outage look like this service is down.
+    """Pure liveness: confirms the process itself is up and responding.
+    Deliberately makes no database or network call - a health check that
+    depends on a dependency's availability would make an unrelated
+    Postgres or Yahoo Finance outage look like this service itself is
+    down. See /api/health/ready for a check that includes the database.
     """
-    persistence: dict[str, str] = {}
-    for name, data_dir in (
-        ("paper_trading", PAPER_TRADING_DATA_DIR),
-        ("watchlists", "data/watchlists"),
-        ("experiments", EXPERIMENTS_DATA_DIR),
-    ):
-        try:
-            path = Path(data_dir)
-            path.mkdir(parents=True, exist_ok=True)
-            probe = path / ".health_probe"
-            probe.write_text("ok", encoding="utf-8")
-            probe.unlink()
-            persistence[name] = "ok"
-        except OSError as exc:
-            persistence[name] = f"error: {exc}"
+    return {
+        "status": "ok",
+        "model_version": MODEL_VERSION_CURRENT,
+        "data_service": "not checked (health checks never call Yahoo Finance - see DATA_UNAVAILABLE handling on data endpoints instead)",
+    }
 
-    overall = "ok" if all(v == "ok" for v in persistence.values()) else "degraded"
+
+@app.get("/api/health/ready", tags=["meta"])
+def readiness_check(db: Session = Depends(get_db)):
+    """Readiness: additionally confirms the database is actually reachable
+    (a real `SELECT 1`, not an assumption) - suitable for a deployment
+    orchestrator deciding whether to route traffic to this instance.
+    """
+    try:
+        db.execute(text("SELECT 1"))
+        database_status = "ok"
+    except Exception as exc:  # noqa: BLE001 - report any DB failure, never crash the readiness probe itself
+        database_status = f"error: {exc}"
+
+    overall = "ok" if database_status == "ok" else "not_ready"
     return {
         "status": overall,
         "model_version": MODEL_VERSION_CURRENT,
-        "persistence": persistence,
-        "data_service": "not checked (health checks never call Yahoo Finance - see DATA_UNAVAILABLE handling on data endpoints instead)",
+        "database": database_status,
     }

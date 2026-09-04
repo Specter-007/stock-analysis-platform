@@ -28,3 +28,26 @@ def list_my_support_requests(db: Session, user_id: str) -> list[SupportRequest]:
     return list(
         db.query(SupportRequest).filter_by(user_id=user_id).order_by(SupportRequest.created_at.desc()).all()
     )
+
+
+# --- Admin (see app.auth.dependencies.require_admin - not reachable by normal users) ---
+
+def admin_list_support_requests(db: Session, status: str | None = None, limit: int = 100) -> list[SupportRequest]:
+    query = db.query(SupportRequest)
+    if status is not None:
+        query = query.filter_by(status=status)
+    return list(query.order_by(SupportRequest.created_at.desc()).limit(min(limit, 500)).all())
+
+
+def admin_set_support_request_status(db: Session, request_id: str, status: str) -> SupportRequest | None:
+    from app.models_db.support import STATUS_CLOSED, STATUS_OPEN
+
+    if status not in (STATUS_OPEN, STATUS_CLOSED):
+        raise ValueError(f"Invalid status: {status!r}")
+    request = db.get(SupportRequest, request_id)
+    if request is None:
+        return None
+    request.status = status
+    db.commit()
+    db.refresh(request)
+    return request
