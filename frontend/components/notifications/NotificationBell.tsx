@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bell, Loader2 } from "lucide-react";
@@ -8,16 +8,16 @@ import { clsx } from "clsx";
 import { listNotifications, markNotificationRead, markAllNotificationsRead, getUnreadNotificationCount } from "@/lib/api";
 import type { Notification } from "@/types/auth";
 import { useAuth } from "@/lib/auth-context";
+import { useDismissableMenu } from "@/hooks/useDismissableMenu";
 
 const POLL_INTERVAL_MS = 30_000;
 
 export function NotificationBell() {
   const { user } = useAuth();
   const router = useRouter();
-  const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<Notification[] | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const { open, setOpen, close, containerRef, triggerRef } = useDismissableMenu<HTMLDivElement>();
 
   useEffect(() => {
     if (!user) return;
@@ -38,14 +38,6 @@ export function NotificationBell() {
     };
   }, [user]);
 
-  useEffect(() => {
-    function onClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, []);
-
   async function toggleOpen() {
     const next = !open;
     setOpen(next);
@@ -62,7 +54,7 @@ export function NotificationBell() {
       setUnreadCount((c) => Math.max(0, c - 1));
       setNotifications((prev) => prev?.map((x) => (x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x)) || null);
     }
-    setOpen(false);
+    close();
     if (n.target_route) router.push(n.target_route);
   }
 
@@ -77,8 +69,10 @@ export function NotificationBell() {
   return (
     <div className="relative" ref={containerRef}>
       <button
+        ref={triggerRef}
         onClick={toggleOpen}
         aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
+        aria-haspopup="menu"
         aria-expanded={open}
         className="relative p-2 text-text-muted hover:text-text-primary cursor-pointer"
       >
@@ -91,7 +85,7 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto bg-card border border-border rounded-md shadow-lg z-50">
+        <div role="menu" aria-label="Notifications" className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto bg-card border border-border rounded-md shadow-lg z-50">
           <div className="flex items-center justify-between px-3 py-2 border-b border-border">
             <span className="text-xs font-semibold text-text-primary uppercase tracking-wide">Notifications</span>
             {unreadCount > 0 && (
@@ -114,6 +108,7 @@ export function NotificationBell() {
               {notifications.map((n) => (
                 <li key={n.id}>
                   <button
+                    role="menuitem"
                     onClick={() => handleNotificationClick(n)}
                     className={clsx(
                       "w-full text-left px-3 py-2.5 hover:bg-card-hover cursor-pointer",
@@ -129,7 +124,7 @@ export function NotificationBell() {
             </ul>
           )}
           <div className="px-3 py-2 border-t border-border">
-            <Link href="/settings/notifications" className="text-xs text-text-muted hover:text-text-primary" onClick={() => setOpen(false)}>
+            <Link href="/settings/notifications" role="menuitem" className="text-xs text-text-muted hover:text-text-primary" onClick={close}>
               Notification settings
             </Link>
           </div>

@@ -1,36 +1,31 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LogOut, Settings, User as UserIcon } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { useDismissableMenu } from "@/hooks/useDismissableMenu";
 
 export function AccountMenu() {
   const { user, loading, logout } = useAuth();
   const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function onClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, []);
+  const { open, setOpen, close, containerRef, triggerRef } = useDismissableMenu<HTMLDivElement>();
 
   if (loading) return <div className="w-16 h-8" aria-hidden="true" />;
 
   if (!user) {
     return (
-      <div className="flex items-center gap-2">
-        <Link href="/login" className="text-sm text-text-muted hover:text-text-primary px-2 py-1.5">
+      <div className="flex items-center gap-1 sm:gap-2">
+        <Link href="/login" className="text-sm text-text-muted hover:text-text-primary px-2 py-1.5 whitespace-nowrap">
           Sign in
         </Link>
+        {/* Collapsed below `sm` to keep the header from cramming two auth
+            actions into the smallest phone widths - reachable from the
+            mobile nav panel and from the login page's own "Create an
+            account" link there instead. */}
         <Link
           href="/register"
-          className="text-sm bg-accent text-white px-3 py-1.5 rounded-md font-medium hover:opacity-90"
+          className="hidden sm:inline-block text-sm bg-accent text-white px-3 py-1.5 rounded-md font-medium hover:opacity-90 whitespace-nowrap"
         >
           Sign up
         </Link>
@@ -39,7 +34,7 @@ export function AccountMenu() {
   }
 
   async function handleLogout() {
-    setOpen(false);
+    close();
     await logout();
     router.push("/");
   }
@@ -47,24 +42,28 @@ export function AccountMenu() {
   return (
     <div className="relative" ref={containerRef}>
       <button
+        ref={triggerRef}
         onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Account menu"
         className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-card-hover cursor-pointer"
       >
-        <UserIcon size={16} className="text-text-muted" aria-hidden="true" />
-        <span className="text-sm text-text-primary max-w-[120px] truncate">{user.display_name}</span>
+        <UserIcon size={16} className="text-text-muted shrink-0" aria-hidden="true" />
+        <span className="hidden sm:inline text-sm text-text-primary max-w-[120px] truncate">{user.display_name}</span>
       </button>
       {open && (
-        <div className="absolute right-0 mt-2 w-48 bg-card border border-border rounded-md shadow-lg z-50 py-1">
+        <div role="menu" aria-label="Account" className="absolute right-0 mt-2 w-48 bg-card border border-border rounded-md shadow-lg z-50 py-1">
           <Link
             href="/settings/account"
-            onClick={() => setOpen(false)}
+            role="menuitem"
+            onClick={close}
             className="flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-card-hover hover:text-text-primary"
           >
             <Settings size={14} aria-hidden="true" /> Settings
           </Link>
           <button
+            role="menuitem"
             onClick={handleLogout}
             className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-secondary hover:bg-card-hover hover:text-text-primary cursor-pointer"
           >
